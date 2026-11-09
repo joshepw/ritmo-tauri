@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./bridge.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#101114;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.08px}
+a{color:#0a84ff;text-decoration:none}a:hover{color:#409cff}
+input::placeholder{color:rgba(235,235,245,.38)}
+body.app,body.app [data-desktop]{background:transparent!important;overflow:hidden!important}
+body.app [data-desktop]{height:100vh}
+body.app [data-anchor]{top:1px!important;right:1px!important;left:1px!important;bottom:1px!important}
+body.app [data-anchor] [data-glass]{height:100%!important;max-height:100%;box-sizing:border-box}
+body.app [data-glass]{background:#0c0c0c!important;border-color:rgba(255,255,255,.08)!important;box-shadow:none!important;backdrop-filter:none!important}
+body.app [data-tip-fill]{border-left-color:#0c0c0c!important}
+@keyframes ritmo-spin{to{transform:rotate(360deg)}}
+@keyframes ritmo-task-in{from{opacity:0;transform:translateY(8px);background:rgba(10,132,255,.28)}to{opacity:1;transform:none;background:transparent}}
+@keyframes ritmo-breath-out{from{opacity:1;transform:scale(1);max-height:220px;margin-top:8px;padding-top:8px;padding-bottom:8px}to{opacity:0;transform:scale(.92);max-height:0;margin-top:0;padding-top:0;padding-bottom:0}}
+@property --ritmo-live{syntax:"<color>";inherits:true;initial-value:#ff453a}
+@keyframes ritmo-live{0%,15%{--ritmo-live:#ff453a}35%,55%{--ritmo-live:transparent}75%,100%{--ritmo-live:#ff453a}}
+@keyframes ritmo-check{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}
+@keyframes ritmo-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-3px)}40%{transform:translateX(3px)}60%{transform:translateX(-2px)}80%{transform:translateX(2px)}}
+</style>
+</helmet>
+<div data-desktop="1" style="min-height:100vh;position:relative;overflow:hidden;background:radial-gradient(60% 50% at 20% 85%,#5b3a6e 0%,transparent 70%),radial-gradient(55% 55% at 85% 20%,#1f4a73 0%,transparent 70%),radial-gradient(50% 40% at 55% 60%,#7a4a3a 0%,transparent 70%),#15161b">
+
+  <sc-if value="{{ notApp }}" hint-placeholder-val="{{ true }}">
+  <!-- Barra de menú -->
+  <div style="height:28px;background:rgba(20,20,24,.35);backdrop-filter:blur(30px) saturate(180%);display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:0 14px;color:#fff;font-size:13px;font-weight:500">
+    <div onClick="{{ togglePanel }}" style="display:flex;align-items:center;gap:10px;height:22px;padding:0 9px;border-radius:6px;background:rgba(255,255,255,.2);font-variant-numeric:tabular-nums;cursor:default">
+      <sc-if value="{{ showBarTimer }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:5px">
+        <div style="width:9px;height:9px;border-radius:50%;border:1.6px solid {{ modeColor }};box-sizing:border-box"></div>
+        <span>{{ timeText }}</span>
+      </div>
+      </sc-if>
+      <sc-if value="{{ showBarDivider }}" hint-placeholder-val="{{ true }}">
+      <div style="width:1px;height:12px;background:rgba(255,255,255,.3)"></div>
+      </sc-if>
+      <sc-if value="{{ showBarMeeting }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:5px">
+        <div style="width:12px;height:9px;border-radius:2px;background:#fff;position:relative">
+          <div style="position:absolute;right:-3.5px;top:1.5px;border-top:3px solid transparent;border-bottom:3px solid transparent;border-right:4px solid #fff"></div>
+        </div>
+        <span style="margin-left:3px">{{ barMeetingLabel }}</span>
+      </div>
+      </sc-if>
+      <sc-if value="{{ showBarIconOnly }}">
+        <div style="width:10px;height:10px;border-radius:50%;border:1.6px solid #fff;box-sizing:border-box"></div>
+      </sc-if>
+    </div>
+    <span style="padding:0 8px">29°</span>
+    <span style="padding:0 4px">{{ menuClock }}</span>
+  </div>
+
+  </sc-if>
+
+  <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ true }}">
+  <div data-anchor="1" style="position:absolute;top:34px;right:150px;display:flex;align-items:flex-start;gap:10px">
+
+    <!-- Panel principal -->
+    <div data-glass="1" style="width:356px;min-height:0;position:relative;background:rgba(38,38,44,.6);backdrop-filter:blur(40px) saturate(180%);border:.5px solid rgba(255,255,255,.16);border-radius:18px;box-shadow:0 0 0 .5px rgba(0,0,0,.5),0 24px 70px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);color:#f5f5f7;display:flex;flex-direction:column">
+
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;padding:16px 16px 12px">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:12px;font-weight:600;color:#ff453a;text-transform:uppercase;letter-spacing:.3px">{{ weekdayLabel }}</span>
+          <span style="font-size:24px;font-weight:700;letter-spacing:-.4px;line-height:1.05">{{ dateLong }}</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+        <div data-nodrag="1" onClick="{{ toggleChat }}" title="{{ chatBtnTitle }}" style="position:relative;width:28px;height:28px;border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:default;background:{{ chatBtnBg }};color:#f5f5f7" style-hover="background:rgba(255,255,255,.16)">
+          <img src="assets/google-chat.svg" alt="Google Chat" style="width:16px;height:16px;display:block;object-fit:contain"></img>
+        </div>
+        <div data-nodrag="1" onClick="{{ toggleAi }}" title="Gemini" style="width:28px;height:28px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;cursor:default;background:{{ aiBtnBg }}" style-hover="background:rgba(255,255,255,.16)">
+          <img src="assets/gemini.svg" alt="Gemini" style="width:16px;height:16px;display:block;object-fit:contain"></img>
+        </div>
+        </div>
+      </div>
+
+      <!-- Enfoque -->
+      <div style="margin:0 10px;padding:12px;border-radius:14px;background:#151515;display:flex;align-items:center;gap:12px;position:relative">
+        <div style="position:relative;width:60px;height:60px;flex:none">
+          <svg width="60" height="60" viewBox="0 0 60 60" style="transform:rotate(-90deg)">
+            <circle cx="30" cy="30" r="26" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="4"></circle>
+            <circle cx="30" cy="30" r="26" fill="none" stroke="{{ modeColor }}" stroke-width="4" stroke-linecap="round" stroke-dasharray="163.36" stroke-dashoffset="{{ ringOffset }}" style="transition:stroke-dashoffset .9s linear"></circle>
+          </svg>
+          <div onClick="{{ toggleRun }}" style="position:absolute;inset:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:{{ modeColor }};cursor:default" style-hover="background:rgba(255,255,255,.07)">
+            <sc-if value="{{ isPaused }}" hint-placeholder-val="{{ true }}">
+              <svg width="22" height="22" viewBox="0 0 24 24" style="display:block"><path transform="translate(-0.9 0)" d="M7 4.8v14.4c0 .9 1 1.4 1.7.9l11-7.2c.7-.4.7-1.4 0-1.8l-11-7.2C8 3.4 7 3.9 7 4.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>
+            </sc-if>
+            <sc-if value="{{ running }}">
+              <svg width="22" height="22" viewBox="0 0 24 24" style="display:block"><rect x="6" y="4.5" width="4" height="15" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"></rect><rect x="14" y="4.5" width="4" height="15" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"></rect></svg>
+            </sc-if>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="font-size:26px;font-weight:600;letter-spacing:-.5px;font-variant-numeric:tabular-nums;line-height:1">{{ timeText }}</span>
+            <span style="font-size:11.5px;color:rgba(235,235,245,.55)">{{ modeName }}</span>
+          </div>
+          <div onClick="{{ toggleTaskMenu }}" style="display:flex;align-items:center;gap:4px;font-size:12.5px;cursor:default;min-width:0">
+            <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ focusTaskColor }}">{{ focusTaskLabel }}</span>
+            <span style="font-size:9px;color:rgba(235,235,245,.5)">▾</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:2px;background:#0c0c0c;border-radius:8px;padding:2px">
+          <sc-for list="{{ modes }}" as="m" hint-placeholder-count="2">
+            <div onClick="{{ m.select }}" title="{{ m.label }}" style="width:24px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:default;background:{{ m.bg }};color:{{ m.fg }}">{{ m.icon }}</div>
+          </sc-for>
+        </div>
+
+        <sc-if value="{{ taskMenuOpen }}">
+          <div style="position:absolute;top:74px;left:0;right:0;z-index:6;background:#151515;border:.5px solid rgba(255,255,255,.08);border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.5);padding:5px;display:flex;flex-direction:column;max-height:250px;overflow-y:auto">
+            <div style="padding:5px 9px 6px;font-size:11px;font-weight:600;color:rgba(235,235,245,.5)">Enfocarse en</div>
+            <sc-for list="{{ focusOptions }}" as="fo" hint-placeholder-count="5">
+              <div onClick="{{ fo.select }}" style="display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:7px;font-size:13px;cursor:default" style-hover="background:#0a84ff">
+                <span style="width:12px;font-size:11px">{{ fo.check }}</span>
+                <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ fo.title }}</span>
+                <span style="font-size:11px;color:rgba(235,235,245,.55)">{{ fo.count }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- Descanso: respiración -->
+      <sc-if value="{{ isBreak }}">
+        <div style="margin:8px 10px 0;padding:8px 18px;border-radius:16px;background:#050807;border:.5px solid rgba(255,255,255,.08);position:relative;display:flex;align-items:center;justify-content:center;min-height:{{ breathMin }};overflow:{{ breathOverflow }};pointer-events:{{ breathPointer }};animation:{{ breathLeave }}">
+          <div style="width:170px;height:170px;display:flex;align-items:center;justify-content:center">{{ breathOrb }}</div>
+          <div onClick="{{ toggleRun }}" title="{{ breathCta }}" style="position:absolute;left:12px;bottom:12px;z-index:2;width:28px;height:28px;border-radius:50%;box-sizing:border-box;border:1px solid {{ breathRunBorder }};background:transparent;display:flex;align-items:center;justify-content:center;cursor:default;color:{{ breathRunFg }}">
+            <sc-if value="{{ isPaused }}" hint-placeholder-val="{{ true }}">
+              <svg width="11" height="11" viewBox="0 0 24 24" style="display:block;margin-left:1px"><path d="M7 4.8v14.4c0 .9 1 1.4 1.7.9l11-7.2c.7-.4.7-1.4 0-1.8l-11-7.2C8 3.4 7 3.9 7 4.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path></svg>
+            </sc-if>
+            <sc-if value="{{ running }}">
+              <svg width="11" height="11" viewBox="0 0 24 24" style="display:block"><rect x="5.5" y="4" width="3.5" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"></rect><rect x="15" y="4" width="3.5" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"></rect></svg>
+            </sc-if>
+          </div>
+          <span style="position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:2;font-size:10.5px;color:rgba(235,235,245,.4);font-variant-numeric:tabular-nums;letter-spacing:.2px;pointer-events:none">{{ breathHint }}</span>
+          <div onClick="{{ skipBreak }}" title="Saltar descanso" style="position:absolute;right:12px;bottom:12px;z-index:2;width:28px;height:28px;border-radius:50%;box-sizing:border-box;border:1px solid rgba(255,255,255,.2);background:transparent;display:flex;align-items:center;justify-content:center;cursor:default;color:rgba(235,235,245,.5)">
+            <svg width="11" height="11" viewBox="0 0 24 24" style="display:block"><path d="M4.5 5.4v13.2c0 .6.7 1 1.2.6l7.6-6.6c.4-.3.4-.9 0-1.2L5.7 4.8c-.5-.4-1.2 0-1.2.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path><path d="M17.5 5v14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- Siguiente reunión -->
+      <div style="margin:8px 10px 0;padding:12px;border-radius:14px;background:rgba(10,132,255,.16);display:flex;align-items:center;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="width:14px;height:14px;border-radius:4px;background:{{ nextColor }};color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ nextAbbr }}</div>
+            <span style="font-size:11.5px;font-weight:600;color:#64b0ff">{{ nextMeta }}</span>
+          </div>
+          <span style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ nextTitle }}</span>
+        </div>
+        <div onClick="{{ joinNext }}" title="{{ nextJoinTitle }}" style="height:28px;padding:0 14px;border-radius:14px;background:#0a84ff;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;cursor:default" style-hover="background:#409cff">Unirse</div>
+      </div>
+
+      <!-- Segmentado -->
+      <div style="margin:12px 10px 4px;position:relative;display:grid;grid-template-columns:1fr 1fr 1fr;background:#151515;border-radius:9px;padding:2px">
+        <div style="position:absolute;top:2px;bottom:2px;left:calc({{ segPos }} + 2px);width:calc(33.333% - 4px);border-radius:7px;background:rgba(255,255,255,.16);box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .25s cubic-bezier(.3,.7,.4,1)"></div>
+        <sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="3">
+          <div onClick="{{ tb.select }}" style="position:relative;text-align:center;font-size:12.5px;font-weight:500;padding:4px 0;cursor:default;color:{{ tb.fg }}">{{ tb.label }}</div>
+        </sc-for>
+      </div>
+
+      <div style="flex:1;min-height:0;overflow-y:auto;padding:4px 0 8px">
+        <sc-if value="{{ isHoy }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:10px 18px 4px;font-size:12px;font-weight:600;color:rgba(235,235,245,.5)">Agenda</div>
+          <sc-if value="{{ eventsLoading }}">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 18px;font-size:12.5px;color:rgba(235,235,245,.55)">
+              <div style="width:14px;height:14px;border-radius:50%;border:1.6px solid rgba(255,255,255,.2);border-top-color:#f5f5f7;animation:ritmo-spin .7s linear infinite;flex:none"></div>
+              <span>Cargando eventos</span>
+            </div>
+          </sc-if>
+          <sc-for list="{{ today }}" as="ev" hint-placeholder-count="5">
+            <sc-if value="{{ ev.isNow }}">
+              <div style="display:flex;align-items:center;gap:6px;padding:2px 18px">
+                <span style="font-size:12px;font-weight:600;color:#ff453a;width:58px;flex:none;white-space:nowrap;font-variant-numeric:tabular-nums">{{ nowMark }}</span>
+                <div style="width:6px;height:6px;border-radius:50%;background:#ff453a"></div>
+                <div style="flex:1;height:1px;background:#ff453a"></div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ ev.isDone }}">
+              <div style="padding:6px 18px 8px 82px;font-size:12px;color:rgba(235,235,245,.45)">Ya terminaron los eventos de hoy</div>
+            </sc-if>
+            <sc-if value="{{ ev.isEvent }}">
+              <div style="position:{{ ev.anchor }};display:flex;align-items:center;gap:10px;margin:{{ ev.inset }};padding:{{ ev.box }};border:{{ ev.edge }};border-radius:{{ ev.curve }};animation:{{ ev.pulse }};opacity:{{ ev.opacity }}">
+                <sc-if value="{{ ev.live }}">
+                  <div style="position:absolute;top:8px;left:8px;width:5px;height:5px;border-radius:50%;background:var(--ritmo-live,#ff453a)"></div>
+                </sc-if>
+                <span style="width:58px;font-size:12px;color:rgba(235,235,245,.6);font-variant-numeric:tabular-nums">{{ ev.time }}</span>
+                <div style="width:3px;align-self:stretch;border-radius:2px;background:{{ ev.color }}"></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+                  <span style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ ev.title }}</span>
+                  <div style="display:flex;align-items:center;gap:5px;min-width:0">
+                    <div title="{{ ev.provName }}" style="width:14px;height:14px;flex:none;border-radius:4px;background:{{ ev.provColor }};color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ ev.provAbbr }}</div>
+                    <span style="font-size:11.5px;color:rgba(235,235,245,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ ev.meta }}</span>
+                  </div>
+                </div>
+                <sc-if value="{{ ev.canJoin }}">
+                  <div onClick="{{ ev.join }}" title="{{ ev.joinTitle }}" style="height:22px;padding:0 10px;border-radius:11px;background:rgba(255,255,255,.1);font-size:11.5px;font-weight:500;display:flex;align-items:center;cursor:default;flex:none" style-hover="background:{{ ev.provColor }}">Unirse</div>
+                </sc-if>
+              </div>
+            </sc-if>
+          </sc-for>
+
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:16px 18px 6px">
+            <span style="font-size:12px;font-weight:600;color:rgba(235,235,245,.5)">Mis tareas</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <sc-if value="{{ hasTaskHistory }}">
+                <div onClick="{{ toggleHistory }}" style="font-size:12px;color:#0a84ff;cursor:default">{{ historyLabel }}</div>
+              </sc-if>
+              <span style="font-size:12px;color:rgba(235,235,245,.5)">{{ pendingCount }}</span>
+            </div>
+          </div>
+          <sc-if value="{{ tasksLoading }}">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 18px;font-size:12.5px;color:rgba(235,235,245,.55)">
+              <div style="width:14px;height:14px;border-radius:50%;border:1.6px solid rgba(255,255,255,.2);border-top-color:#f5f5f7;animation:ritmo-spin .7s linear infinite;flex:none"></div>
+              <span>Cargando tareas</span>
+            </div>
+          </sc-if>
+          <sc-for list="{{ tasks }}" as="tk" hint-placeholder-count="6">
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:6px 18px;animation:{{ tk.enter }}">
+              <div onClick="{{ tk.toggle }}" style="margin-top:1px;width:18px;height:18px;flex:none;border-radius:50%;box-sizing:border-box;border:{{ tk.edge }};border-top-color:{{ tk.edgeTop }};background:{{ tk.fill }};display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:800;cursor:default;animation:{{ tk.motion }}">{{ tk.mark }}</div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+                <span style="font-size:13px;color:{{ tk.color }};text-decoration:{{ tk.deco }}">{{ tk.title }}</span>
+                <span style="font-size:11.5px;color:{{ tk.dueColor }}">{{ tk.due }}</span>
+              </div>
+              <div onClick="{{ tk.focus }}" title="Enfocarme en esta tarea" style="width:22px;height:22px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:default;color:{{ tk.focusColor }}" style-hover="background:rgba(255,255,255,.1)">◎</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ showClickup }}">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;padding:16px 18px 6px">
+              <span style="font-size:12px;font-weight:600;color:rgba(235,235,245,.5)">ClickUp</span>
+              <span style="font-size:12px;color:rgba(235,235,245,.5)">{{ clickupCount }}</span>
+            </div>
+            <sc-if value="{{ clickupLoading }}">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 18px;font-size:12.5px;color:rgba(235,235,245,.55)">
+                <div style="width:14px;height:14px;border-radius:50%;border:1.6px solid rgba(255,255,255,.2);border-top-color:#ff5a36;animation:ritmo-spin .7s linear infinite;flex:none"></div>
+                <span>Cargando tareas</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ clickupEmpty }}">
+              <div style="padding:6px 18px 8px;font-size:12.5px;color:rgba(235,235,245,.45)">Sin tareas asignadas</div>
+            </sc-if>
+            <sc-for list="{{ clickupGroups }}" as="cg" hint-placeholder-count="2">
+              <div style="padding:10px 18px 2px;font-size:12px;font-weight:600;color:rgba(235,235,245,.5)">{{ cg.label }}</div>
+              <sc-for list="{{ cg.tasks }}" as="tk">
+                <div style="display:flex;align-items:flex-start;gap:10px;padding:6px 18px">
+                  <div onClick="{{ tk.toggle }}" style="margin-top:1px;width:18px;height:18px;flex:none;border-radius:50%;box-sizing:border-box;border:{{ tk.edge }};border-top-color:{{ tk.edgeTop }};background:{{ tk.fill }};display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:800;cursor:default;animation:{{ tk.motion }}">{{ tk.mark }}</div>
+                  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+                    <span style="font-size:13px;color:#f5f5f7">{{ tk.title }}</span>
+                    <sc-if value="{{ tk.hasDue }}">
+                      <span style="font-size:11.5px;color:{{ tk.dueColor }}">{{ tk.due }}</span>
+                    </sc-if>
+                  </div>
+                  <div onClick="{{ tk.focus }}" title="Enfocarme en esta tarea" style="width:22px;height:22px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:default;color:{{ tk.focusColor }}" style-hover="background:rgba(255,255,255,.1)">◎</div>
+                </div>
+              </sc-for>
+            </sc-for>
+          </sc-if>
+        </sc-if>
+
+        <sc-if value="{{ isProx }}">
+          <sc-for list="{{ days }}" as="d" hint-placeholder-count="4">
+            <div style="padding:12px 18px 4px;font-size:12px;font-weight:600;color:rgba(235,235,245,.5)">{{ d.label }}</div>
+            <sc-for list="{{ d.events }}" as="ev">
+              <div style="display:flex;align-items:center;gap:10px;padding:5px 18px">
+                <span style="width:58px;font-size:12px;color:rgba(235,235,245,.6);font-variant-numeric:tabular-nums">{{ ev.time }}</span>
+                <div style="width:3px;height:18px;border-radius:2px;background:{{ ev.color }}"></div>
+                <span style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ ev.title }}</span>
+                <div title="{{ ev.provName }}" style="height:16px;padding:0 5px;flex:none;border-radius:4px;background:{{ ev.provColor }};color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center">{{ ev.provShort }}</div>
+                <sc-if value="{{ ev.canJoin }}">
+                  <div onClick="{{ ev.join }}" title="{{ ev.joinTitle }}" style="width:22px;height:22px;flex:none;border-radius:50%;background:rgba(255,255,255,.08);font-size:11px;display:flex;align-items:center;justify-content:center;cursor:default" style-hover="background:{{ ev.provColor }}">↗</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </sc-for>
+        </sc-if>
+
+        <sc-if value="{{ isNotas }}">
+          <div style="display:flex;flex-direction:column;padding:6px 10px">
+            <sc-for list="{{ notes }}" as="n" hint-placeholder-count="4">
+              <div style="padding:10px 8px;border-radius:10px;display:flex;flex-direction:column;gap:2px;cursor:default" style-hover="background:rgba(255,255,255,.06)">
+                <div style="display:flex;justify-content:space-between;gap:8px">
+                  <span style="font-size:13px;font-weight:600">{{ n.title }}</span>
+                  <span style="font-size:11.5px;color:rgba(235,235,245,.45)">{{ n.date }}</span>
+                </div>
+                <span style="font-size:12.5px;color:rgba(235,235,245,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ n.body }}</span>
+                <sc-if value="{{ n.canJoin }}">
+                  <div onClick="{{ n.join }}" style="align-self:flex-start;margin-top:5px;height:22px;padding:0 9px 0 4px;border-radius:11px;background:rgba(255,255,255,.08);display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:default" style-hover="background:rgba(255,255,255,.14)">
+                    <div style="width:14px;height:14px;border-radius:4px;background:{{ n.provColor }};color:#fff;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ n.provAbbr }}</div>
+                    <span>{{ n.joinLabel }}</span>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+            <div onClick="{{ addNote }}" style="padding:8px;font-size:13px;color:#0a84ff;cursor:default">Nueva nota</div>
+          </div>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ hasToast }}">
+        <div style="position:absolute;left:50%;bottom:58px;transform:translateX(-50%);z-index:8;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:18px;background:#151515;border:.5px solid rgba(255,255,255,.08);box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:12.5px;white-space:nowrap">
+          <div style="width:16px;height:16px;border-radius:4px;background:{{ toastColor }};color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ toastAbbr }}</div>
+          <span>{{ toastText }}</span>
+        </div>
+      </sc-if>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 12px;border-top:.5px solid rgba(255,255,255,.1)">
+        <sc-if value="{{ taskAdding }}">
+          <div style="width:16px;height:16px;flex:none;border-radius:50%;border:1.6px solid rgba(255,255,255,.2);border-top-color:#f5f5f7;animation:ritmo-spin .7s linear infinite"></div>
+        </sc-if>
+        <sc-if value="{{ taskReady }}" hint-placeholder-val="{{ true }}">
+          <div style="width:18px;height:18px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;color:rgba(235,235,245,.5);font-size:16px;line-height:1">+</div>
+        </sc-if>
+        <input value="{{ draft }}" onChange="{{ setDraft }}" onKeyDown="{{ addKey }}" placeholder="Nueva tarea" style="flex:1;background:transparent;border:0;outline:0;color:#f5f5f7;font-size:13px;font-family:inherit;padding:0"></input>
+        <div data-nodrag="1" onClick="{{ openPrefs }}" title="Preferencias" style="width:28px;height:28px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:default;color:rgba(235,235,245,.78);background:{{ prefsBtnBg }}" style-hover="background:rgba(255,255,255,.16)"><svg width="16" height="16" viewBox="0 0 24 24" style="display:block"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h4M14 7h6"></path><circle cx="11" cy="7" r="2.15"></circle><path d="M4 12h8M18 12h2"></path><circle cx="15" cy="12" r="2.15"></circle><path d="M4 17h2M12 17h8"></path><circle cx="9" cy="17" r="2.15"></circle></g></svg></div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const Component = window.RitmoDefine(DCLogic);
+</script>
+</body>
+</html>

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+html,body{margin:0;height:100%;background:#0c0c0c;color:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.08px}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;background:#0c0c0c;overflow:hidden">
+  <div style="width:230px;flex:none;background:#151515;border-right:.5px solid rgba(255,255,255,.08);display:flex;flex-direction:column;padding:18px 12px 16px">
+    <div style="display:flex;align-items:center;gap:10px;padding:0 8px 20px">
+      <img src="./assets/ritmo.png" alt="Ritmo" style="width:34px;height:34px;display:block;border-radius:8px">
+      <div style="display:flex;flex-direction:column">
+        <span style="font-size:14px;font-weight:700">Ritmo</span>
+        <span style="font-size:11.5px;color:rgba(235,235,245,.5)">Configuración inicial</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ steps }}" as="st" hint-placeholder-count="6">
+        <div onClick="{{ st.go }}" style="display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;cursor:default;background:{{ st.bg }};opacity:{{ st.op }}">
+          <div style="width:20px;height:20px;flex:none;border-radius:50%;box-sizing:border-box;border:1.5px solid {{ st.ring }};background:{{ st.fill }};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:{{ st.numFg }}">{{ st.mark }}</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <span style="font-size:13px;font-weight:{{ st.weight }}">{{ st.label }}</span>
+            <span style="font-size:11px;color:rgba(235,235,245,.45)">{{ st.sub }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="flex:1"></div>
+    <div style="padding:0 8px;font-size:11px;line-height:1.45;color:rgba(235,235,245,.4)">Puedes cambiar todo esto más tarde en Preferencias (⌘,).</div>
+  </div>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <div style="flex:1;min-height:0;overflow-y:auto;padding:36px 40px 20px;display:flex;flex-direction:column">
+
+      <sc-if value="{{ s0 }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center">
+          <img src="./assets/ritmo.png" alt="Ritmo" style="width:96px;height:96px;display:block;border-radius:22px">
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+            <span style="font-size:32px;font-weight:700;letter-spacing:-.6px">Bienvenido a Ritmo</span>
+            <span style="font-size:15px;line-height:1.5;color:rgba(235,235,245,.65);max-width:440px">Tu día, tus reuniones y tu enfoque en la barra de menú, conectados a Google Workspace.</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:420px;text-align:left;margin-top:6px">
+            <sc-for list="{{ features }}" as="f" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:14px">
+                <div style="width:36px;height:36px;flex:none;border-radius:10px;background:{{ f.bg }};color:{{ f.fg }};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700">{{ f.icon }}</div>
+                <div style="display:flex;flex-direction:column;gap:1px">
+                  <span style="font-size:14px;font-weight:600">{{ f.title }}</span>
+                  <span style="font-size:12.5px;color:rgba(235,235,245,.55)">{{ f.desc }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s1 }}">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:26px">
+          <span style="font-size:24px;font-weight:700;letter-spacing:-.4px">Conecta tu cuenta de Google</span>
+          <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6);max-width:520px">Usa la cuenta de Google Workspace de tu empresa. Se abrirá el navegador para iniciar sesión; Ritmo nunca ve tu contraseña.</span>
+        </div>
+        <sc-if value="{{ gIdle }}">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:16px;padding:36px 24px;border-radius:14px;background:#151515;border:.5px solid rgba(255,255,255,.08)">
+            <div onClick="{{ connectGoogle }}" style="height:40px;padding:0 20px;border-radius:20px;background:#fff;color:#1f1f1f;font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px;cursor:default;box-shadow:0 1px 3px rgba(0,0,0,.3)">
+              <span style="font-size:16px;font-weight:700;color:#4285f4">G</span>
+              <span>Continuar con Google</span>
+            </div>
+            <span style="font-size:12px;color:rgba(235,235,245,.45)">Solo cuentas de tu organización</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ gConnecting }}">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:36px 24px;border-radius:14px;background:#151515;border:.5px solid rgba(255,255,255,.08)">
+            <div style="display:flex;gap:6px">
+              <sc-for list="{{ waitDots }}" as="wd" hint-placeholder-count="3">
+                <div style="width:8px;height:8px;border-radius:50%;background:#0a84ff;opacity:{{ wd.op }}"></div>
+              </sc-for>
+            </div>
+            <span style="font-size:14px">Esperando confirmación en el navegador</span>
+            <span style="font-size:12px;color:rgba(235,235,245,.5)">Elige tu cuenta y acepta los permisos en la ventana de Google.</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ gDone }}">
+          <div style="display:flex;align-items:center;gap:14px;padding:16px;border-radius:14px;background:#151515;border:.5px solid rgba(255,255,255,.08)">
+            <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#4f8dff,#b98cff);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">{{ accountInitials }}</div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:15px;font-weight:600">{{ accountName }}</span>
+              <span style="font-size:13px;color:rgba(235,235,245,.6)">{{ accountEmail }}</span>
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#32d74b">
+                <div style="width:6px;height:6px;border-radius:50%;background:#32d74b"></div>
+                <span>Conectada</span>
+              </div>
+            </div>
+            <div onClick="{{ changeAccount }}" style="height:28px;padding:0 12px;border-radius:7px;background:rgba(255,255,255,.1);font-size:13px;display:flex;align-items:center;cursor:default">Cambiar cuenta</div>
+          </div>
+          <div style="margin-top:14px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:rgba(235,235,245,.55)">
+            <span style="color:#32d74b">✓</span>
+            <span>La sesión queda guardada en este Mac.</span>
+          </div>
+        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{ s2 }}">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:22px">
+          <span style="font-size:24px;font-weight:700;letter-spacing:-.4px">Elige qué conectar</span>
+          <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6);max-width:520px">Ritmo solo pide acceso a lo que actives. Puedes quitar cualquier permiso cuando quieras.</span>
+        </div>
+        <div style="border-radius:12px;background:#151515;border:.5px solid rgba(255,255,255,.08);overflow:hidden">
+          <sc-for list="{{ services }}" as="sv" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-top:{{ sv.border }}">
+              <div style="width:34px;height:34px;flex:none;border-radius:9px;background:{{ sv.tileBg }};display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:{{ sv.tileFg }};overflow:hidden">
+                <sc-if value="{{ sv.isGemini }}" hint-placeholder-val="{{ false }}">
+                  <img src="./assets/gemini.svg" alt="" style="width:22px;height:22px;display:block">
+                </sc-if>
+                <sc-if value="{{ sv.noImg }}">{{ sv.icon }}</sc-if>
+              </div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:14px;font-weight:600">{{ sv.name }}</span>
+                  <sc-if value="{{ sv.required }}">
+                    <span style="font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.1);color:rgba(235,235,245,.7)">Obligatorio</span>
+                  </sc-if>
+                </div>
+                <span style="font-size:12.5px;color:rgba(235,235,245,.55)">{{ sv.desc }}</span>
+                <sc-if value="{{ sv.warn }}">
+                  <span style="font-size:12px;color:#ff9f0a">{{ sv.warn }}</span>
+                </sc-if>
+              </div>
+              <div onClick="{{ sv.toggle }}" style="width:32px;height:19px;flex:none;border-radius:10px;background:{{ sv.tBg }};position:relative;cursor:default;opacity:{{ sv.tOp }}">
+                <div style="position:absolute;top:2px;left:{{ sv.tKnob }};width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s3 }}">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:22px">
+          <span style="font-size:24px;font-weight:700;letter-spacing:-.4px">Permisos de macOS</span>
+          <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6);max-width:520px">macOS te pedirá confirmar cada uno. Sin ellos Ritmo funciona, pero sin avisos ni arranque automático.</span>
+        </div>
+        <div style="border-radius:12px;background:#151515;border:.5px solid rgba(255,255,255,.08);overflow:hidden">
+          <sc-for list="{{ perms }}" as="pm" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-top:{{ pm.border }}">
+              <div style="width:34px;height:34px;flex:none;border-radius:9px;background:{{ pm.color }};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff">{{ pm.icon }}</div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:14px;font-weight:600">{{ pm.name }}</span>
+                <span style="font-size:12.5px;color:rgba(235,235,245,.55)">{{ pm.desc }}</span>
+              </div>
+              <sc-if value="{{ pm.granted }}">
+                <div style="height:28px;padding:0 10px;display:flex;align-items:center;gap:6px;font-size:13px;color:#32d74b"><span>✓</span><span>Permitido</span></div>
+              </sc-if>
+              <sc-if value="{{ pm.pending }}">
+                <div onClick="{{ pm.grant }}" style="height:28px;padding:0 14px;border-radius:7px;background:#0a84ff;color:#fff;font-size:13px;font-weight:500;display:flex;align-items:center;cursor:default">{{ pm.btn }}</div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:18px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-size:12px;font-weight:600;color:rgba(235,235,245,.55)">Apps de videollamada</span>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{ vcApps }}" as="va" hint-placeholder-count="5">
+              <div style="height:28px;padding:0 10px 0 5px;border-radius:14px;background:rgba(255,255,255,.07);display:flex;align-items:center;gap:7px;font-size:12.5px;opacity:{{ va.op }}">
+                <div style="width:18px;height:18px;border-radius:5px;background:{{ va.color }};color:#fff;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ va.abbr }}</div>
+                <span>{{ va.name }}</span>
+                <span style="font-size:11px;color:{{ va.stColor }}">{{ va.status }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <span style="font-size:11.5px;color:rgba(235,235,245,.45)">Ritmo abrirá cada reunión en su app si está instalada; si no, en el navegador.</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s4 }}">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:22px">
+          <span style="font-size:24px;font-weight:700;letter-spacing:-.4px">Ajusta tu ritmo</span>
+          <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6)">Así se verá Ritmo en la barra de menú.</span>
+        </div>
+        <div style="height:64px;border-radius:12px;background:linear-gradient(90deg,#3a2a48,#1f3550);display:flex;align-items:flex-start;justify-content:flex-end;padding:8px 14px;box-sizing:border-box;margin-bottom:18px">
+          <div style="display:flex;align-items:center;gap:10px;height:22px;padding:0 9px;border-radius:6px;background:rgba(255,255,255,.22);font-size:13px;font-weight:500;font-variant-numeric:tabular-nums">
+            <sc-if value="{{ barTimer }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:5px">
+                <svg width="13" height="13" viewBox="0 0 14 14" style="display:block"><circle cx="7" cy="7" r="5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-dasharray="23.5 31.4" transform="rotate(-90 7 7)"></circle></svg>
+                <span>{{ focusText }}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ barBoth }}">
+              <div style="width:1px;height:12px;background:rgba(255,255,255,.35)"></div>
+            </sc-if>
+            <sc-if value="{{ barMeeting }}">
+              <div style="display:flex;align-items:center;gap:5px">
+                <div style="width:12px;height:9px;border-radius:2px;background:#fff"></div>
+                <span>18 min</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ barNone }}">
+              <svg width="14" height="14" viewBox="0 0 14 14" style="display:block"><circle cx="7" cy="7" r="5" fill="none" stroke="#fff" stroke-width="2"></circle><circle cx="7" cy="7" r="1.6" fill="#fff"></circle></svg>
+            </sc-if>
+          </div>
+        </div>
+        <div style="border-radius:12px;background:#151515;border:.5px solid rgba(255,255,255,.08);overflow:hidden">
+          <sc-for list="{{ custom }}" as="cu" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-top:{{ cu.border }}">
+              <span style="flex:1;font-size:13.5px">{{ cu.label }}</span>
+              <sc-if value="{{ cu.isToggle }}">
+                <div onClick="{{ cu.toggle }}" style="width:32px;height:19px;flex:none;border-radius:10px;background:{{ cu.tBg }};position:relative;cursor:default">
+                  <div style="position:absolute;top:2px;left:{{ cu.tKnob }};width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ cu.isChoice }}">
+                <div style="display:flex;gap:2px;background:rgba(0,0,0,.22);border-radius:7px;padding:2px">
+                  <sc-for list="{{ cu.options }}" as="op">
+                    <div onClick="{{ op.select }}" style="padding:3px 10px;border-radius:5px;font-size:12px;cursor:default;background:{{ op.bg }};color:{{ op.fg }}">{{ op.label }}</div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s5 }}">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;text-align:center">
+          <div style="width:72px;height:72px;border-radius:50%;background:rgba(50,215,75,.16);color:#32d74b;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700">✓</div>
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+            <span style="font-size:28px;font-weight:700;letter-spacing:-.5px">Ritmo está listo</span>
+            <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6);max-width:420px">A partir de aquí Ritmo vive en la barra de menú. Ábrelo con un clic o con {{ shortcut }}.</span>
+          </div>
+          <div style="width:100%;max-width:420px;border-radius:12px;background:#151515;border:.5px solid rgba(255,255,255,.08);text-align:left;overflow:hidden">
+            <sc-for list="{{ summary }}" as="sm" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:{{ sm.border }}">
+                <span style="width:14px;font-size:13px;color:{{ sm.color }}">{{ sm.mark }}</span>
+                <span style="flex:1;font-size:13px">{{ sm.label }}</span>
+                <span style="font-size:12px;color:rgba(235,235,245,.5)">{{ sm.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:14px 20px;border-top:.5px solid rgba(255,255,255,.08)">
+      <span style="font-size:12px;color:rgba(235,235,245,.45)">{{ stepText }}</span>
+      <sc-if value="{{ hasNote }}">
+        <span style="font-size:12px;color:#ff9f0a;max-width:340px">{{ note }}</span>
+      </sc-if>
+      <div style="flex:1"></div>
+      <sc-if value="{{ canSkip }}">
+        <div onClick="{{ next }}" style="height:28px;padding:0 14px;border-radius:7px;font-size:13px;display:flex;align-items:center;cursor:default;color:rgba(235,235,245,.7)">Omitir</div>
+      </sc-if>
+      <sc-if value="{{ canBack }}">
+        <div onClick="{{ back }}" style="height:28px;padding:0 14px;border-radius:7px;background:rgba(255,255,255,.1);font-size:13px;display:flex;align-items:center;cursor:default">Atrás</div>
+      </sc-if>
+      <div onClick="{{ next }}" style="height:28px;min-width:96px;padding:0 16px;box-sizing:border-box;border-radius:7px;background:{{ nextBg }};color:{{ nextFg }};font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:default">{{ nextLabel }}</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    step: 0, google: 'idle', tick: 0, note: '',
+    accountName: '', accountEmail: '', accountInitials: 'G',
+    svc: { cal: true, tasks: false, gemini: false },
+    perm: { notif: false, login: false, shortcut: false },
+    shortcut: '⌥ ⌘ Espacio',
+    pref: { barTimer: true, barMeeting: true, focus: 25, sound: 'brown', aiDaily: true },
+    apps: [],
+  };
+  componentDidMount() {
+    this.iv = setInterval(() => this.setState((s) => ({ tick: s.tick + 1 })), 400);
+    this.load();
+  }
+  componentWillUnmount() { clearInterval(this.iv); }
+  async load() {
+    const tauri = window.__TAURI__;
+    if (!tauri) return;
+    try {
+      const snap = await tauri.core.invoke('snapshot');
+      const p = snap.preferences || {};
+      const email = String(snap.accountEmail || '').replace(/ · Google$/, '');
+      this.setState({
+        google: snap.connected ? 'done' : 'idle',
+        accountName: snap.connected ? (snap.accountName || 'Cuenta de Google') : '',
+        accountEmail: snap.connected ? email : '',
+        accountInitials: snap.accountInitials || 'G',
+        svc: { cal: p.svcCal !== false, tasks: !!p.svcTasks, gemini: !!p.svcGemini },
+        shortcut: p.shortcut || '⌥ ⌘ Espacio',
+        pref: {
+          barTimer: p.barTimer !== false,
+          barMeeting: p.barMeeting !== false,
+          focus: p.focusMin || 25,
+          sound: p.track || 'brown',
+          aiDaily: p.aiDaily !== false,
+        },
+        perm: { notif: this.state.perm.notif, login: !!p.login, shortcut: this.state.perm.shortcut },
+      });
+    } catch (error) { /* the steps still work offline */ }
+    try {
+      const notif = await tauri.core.invoke('notifications_allowed');
+      this.setState((cur) => ({ perm: { ...cur.perm, notif } }));
+    } catch (error) { /* the button still asks */ }
+    try {
+      const apps = await window.__TAURI__.core.invoke('video_apps');
+      this.setState({ apps });
+    } catch (error) { /* chips stay empty until the app answers */ }
+  }
+  fail(error) {
+    const text = typeof error === 'string' ? error : (error && error.message) || 'No se pudo completar la acción.';
+    this.setState({ note: text, google: this.state.google === 'connecting' ? 'idle' : this.state.google });
+  }
+  patch(body) {
+    const tauri = window.__TAURI__;
+    if (!tauri) return Promise.reject('Abre Ritmo desde la app.');
+    return tauri.core.invoke('set_preferences', { patch: body });
+  }
+  renderVals() {
+    const s = this.state;
+    const st = s.step;
+    const gDone = s.google === 'done';
+    const bd = (i) => i ? '.5px solid rgba(255,255,255,.08)' : 'none';
+    const knob = (on) => ({ tBg: on ? '#32d74b' : 'rgba(255,255,255,.2)', tKnob: on ? '15px' : '2px' });
+    const labels = [
+      ['Bienvenida', 'Qué hace Ritmo'],
+      ['Cuenta de Google', gDone ? (s.accountEmail || 'Conectada') : 'Obligatorio'],
+      ['Servicios', 'Calendar, Tasks, Gemini…'],
+      ['Permisos de macOS', 'Avisos y arranque'],
+      ['Personaliza', 'Barra de menú y enfoque'],
+      ['Listo', ''],
+    ];
+    const reach = gDone ? 5 : 1;
+    const setSvc = (k) => {
+      if (k === 'cal') return;
+      const next = !s.svc[k];
+      const keys = { tasks: 'svcTasks', gemini: 'svcGemini' };
+      this.setState({ svc: { ...s.svc, [k]: next }, note: '' });
+      this.patch({ [keys[k]]: next }).catch((error) => {
+        this.setState((cur) => ({ svc: { ...cur.svc, [k]: !next } }));
+        this.fail(error);
+      });
+    };
+    const grant = (k) => {
+      if (k === 'shortcut') {
+        this.setState((cur) => ({ perm: { ...cur.perm, shortcut: true }, note: 'El atajo ya está activo. Puedes cambiarlo en Preferencias.' }));
+        return;
+      }
+      if (k === 'login') {
+        this.patch({ login: true }).then(() => {
+          this.setState((cur) => ({ perm: { ...cur.perm, login: true }, note: '' }));
+        }).catch((error) => this.fail(error));
+        return;
+      }
+      const tauri = window.__TAURI__;
+      if (!tauri) return;
+      tauri.core.invoke('request_notifications').then(() => {
+        this.setState((cur) => ({ perm: { ...cur.perm, notif: true }, note: '' }));
+      }).catch((error) => this.fail(error));
+    };
+    const setPref = (k, v) => {
+      const pref = { ...s.pref, [k]: v };
+      this.setState({ pref, note: '' });
+      if (k === 'barTimer') this.patch({ barTimer: v }).catch((error) => this.fail(error));
+      if (k === 'barMeeting') this.patch({ barMeeting: v }).catch((error) => this.fail(error));
+      if (k === 'aiDaily') this.patch({ aiDaily: v }).catch((error) => this.fail(error));
+      if (k === 'focus') this.patch({ focusMin: v }).catch((error) => this.fail(error));
+      if (k === 'sound') this.patch({ track: v, autoSound: v !== 'none' }).catch((error) => this.fail(error));
+    };
+    const choice = (k, label, opts) => ({
+      isChoice: true, isToggle: false, label,
+      options: opts.map((o) => ({
+        label: o.label,
+        bg: s.pref[k] === o.value ? 'rgba(255,255,255,.18)' : 'transparent',
+        fg: s.pref[k] === o.value ? '#fff' : 'rgba(235,235,245,.6)',
+        select: () => setPref(k, o.value),
+      })),
+    });
+    const toggle = (k, label) => ({ isToggle: true, isChoice: false, label, ...knob(s.pref[k]), toggle: () => setPref(k, !s.pref[k]) });
+    const permDefs = [
+      ['notif', 'Notificaciones', 'Avisos antes de cada reunión', '!', '#ff453a', 'Permitir'],
+      ['login', 'Abrir al iniciar sesión', 'Ritmo se abre solo al encender la Mac', '⏻', '#8e8e93', 'Activar'],
+      ['shortcut', 'Atajo global ' + s.shortcut, 'Se cambia en Preferencias', '⌘', '#0a84ff', 'Listo'],
+    ];
+    const permCount = Object.values(s.perm).filter(Boolean).length;
+    const svcCount = ['cal', 'tasks', 'gemini'].filter((k) => s.svc[k]).length;
+    const nextOk = st !== 1 || gDone;
+    const apps = (s.apps.length ? s.apps : [
+      { name: 'Zoom', abbr: 'Z', color: '#2d8cff', status: '…' },
+      { name: 'Microsoft Teams', abbr: 'T', color: '#5b5fc7', status: '…' },
+      { name: 'Slack', abbr: 'S', color: '#e01e5a', status: '…' },
+      { name: 'Webex', abbr: 'W', color: '#00a0d1', status: '…' },
+      { name: 'Google Meet', abbr: 'M', color: '#1e8e3e', status: 'navegador' },
+    ]).map((app) => ({
+      ...app,
+      op: app.status === 'no instalada' ? 0.5 : 1,
+      stColor: app.status === 'instalada' ? '#32d74b' : 'rgba(235,235,245,.45)',
+    }));
+    return {
+      note: s.note, hasNote: !!s.note, shortcut: s.shortcut,
+      steps: labels.map(([label, sub], i) => ({
+        label, sub, weight: i === st ? 600 : 400,
+        bg: i === st ? 'rgba(255,255,255,.1)' : 'transparent',
+        op: i <= reach ? 1 : 0.45,
+        ring: i < st ? '#32d74b' : i === st ? '#0a84ff' : 'rgba(235,235,245,.3)',
+        fill: i < st ? '#32d74b' : i === st ? '#0a84ff' : 'transparent',
+        mark: i < st ? '✓' : String(i + 1),
+        numFg: i <= st ? '#fff' : 'rgba(235,235,245,.5)',
+        go: () => { if (i <= reach) this.setState({ step: i, note: '' }); },
+      })),
+      s0: st === 0, s1: st === 1, s2: st === 2, s3: st === 3, s4: st === 4, s5: st === 5,
+      features: [
+        { icon: '▦', bg: 'rgba(10,132,255,.2)', fg: '#0a84ff', title: 'Agenda y reuniones', desc: 'Únete con un clic a Meet, Zoom, Teams y más' },
+        { icon: '◎', bg: 'rgba(255,69,58,.2)', fg: '#ff453a', title: 'Enfoque', desc: 'Pomodoro con tareas y descansos guiados' },
+        { icon: '✦', bg: 'rgba(191,90,242,.2)', fg: '#bf5af2', title: 'Gemini', desc: 'Resumen del día con tu agenda y tus tareas' },
+      ],
+      gIdle: s.google === 'idle', gConnecting: s.google === 'connecting', gDone,
+      accountName: s.accountName, accountEmail: s.accountEmail, accountInitials: s.accountInitials,
+      waitDots: [0, 1, 2].map((i) => ({ op: s.tick % 3 === i ? 1 : 0.3 })),
+      connectGoogle: () => {
+        const tauri = window.__TAURI__;
+        if (!tauri) { this.fail('Abre Ritmo desde la app.'); return; }
+        this.setState({ google: 'connecting', note: '' });
+        tauri.core.invoke('sign_in').then((snap) => {
+          const email = String(snap.accountEmail || '').replace(/ · Google$/, '');
+          this.setState({
+            google: 'done',
+            accountName: snap.accountName || 'Cuenta de Google',
+            accountEmail: email,
+            accountInitials: snap.accountInitials || 'G',
+            note: '',
+          });
+        }).catch((error) => this.fail(error));
+      },
+      changeAccount: () => {
+        const tauri = window.__TAURI__;
+        if (!tauri) return;
+        tauri.core.invoke('sign_out').then(() => {
+          this.setState({ google: 'idle', accountName: '', accountEmail: '', note: '' });
+        }).catch((error) => this.fail(error));
+      },
+      services: [
+        { k: 'cal', name: 'Google Calendar', desc: 'Ver tus reuniones y enlaces de videollamada', icon: '▦', tileBg: '#1a73e8', tileFg: '#fff', required: true },
+        { k: 'tasks', name: 'Google Tasks', desc: 'Ver, crear y completar tareas', icon: '✓', tileBg: '#1e8e3e', tileFg: '#fff' },
+        { k: 'gemini', name: 'Gemini', desc: 'Resumen del día con tu agenda y tus tareas', isGemini: true, tileBg: 'rgba(255,255,255,.92)' },
+      ].map((x, i) => ({
+        ...x, border: bd(i), hasImg: !!x.isGemini, noImg: !x.isGemini,
+        isGemini: !!x.isGemini, icon: x.icon || '', tileFg: x.tileFg || '#fff',
+        required: !!x.required, warn: x.warn || '',
+        ...knob(!!s.svc[x.k]), tOp: x.required ? 0.5 : 1,
+        toggle: () => setSvc(x.k),
+      })),
+      perms: permDefs.map(([k, name, desc, icon, color, btn], i) => ({
+        name, desc, icon, color, btn, border: bd(i),
+        granted: !!s.perm[k], pending: !s.perm[k], grant: () => grant(k),
+      })),
+      vcApps: apps,
+      barTimer: s.pref.barTimer, barMeeting: s.pref.barMeeting,
+      barBoth: s.pref.barTimer && s.pref.barMeeting,
+      barNone: !s.pref.barTimer && !s.pref.barMeeting,
+      focusText: s.pref.focus + ':00',
+      custom: [
+        toggle('barTimer', 'Mostrar tiempo del pomodoro en la barra'),
+        toggle('barMeeting', 'Mostrar cuenta regresiva de la próxima reunión'),
+        choice('focus', 'Duración del enfoque', [{ label: '25 min', value: 25 }, { label: '45 min', value: 45 }, { label: '50 min', value: 50 }]),
+        choice('sound', 'Sonido de enfoque', [{ label: 'Marrón', value: 'brown' }, { label: 'Lluvia', value: 'rain' }, { label: '40 Hz', value: 'binaural' }, { label: 'Ninguno', value: 'none' }]),
+        toggle('aiDaily', 'Resumen de Gemini al abrir'),
+      ].map((x, i) => ({ ...x, border: bd(i) })),
+      summary: [
+        { label: 'Cuenta de Google', value: gDone ? (s.accountEmail || 'Conectada') : 'Sin conectar', ok: gDone },
+        { label: 'Servicios de Google', value: svcCount + ' de 5', ok: svcCount > 0 },
+        { label: 'Permisos de macOS', value: permCount + ' de 4', ok: permCount === 4 },
+      ].map((x, i) => ({ ...x, border: bd(i), mark: x.ok ? '✓' : '!', color: x.ok ? '#32d74b' : '#ff9f0a' })),
+      stepText: st === 0 || st === 5 ? '' : 'Paso ' + st + ' de 4',
+      canBack: st > 0 && st < 5, canSkip: st === 3,
+      nextLabel: st === 0 ? 'Comenzar' : st === 5 ? 'Abrir Ritmo' : 'Continuar',
+      nextBg: nextOk ? '#0a84ff' : 'rgba(255,255,255,.1)',
+      nextFg: nextOk ? '#fff' : 'rgba(235,235,245,.4)',
+      next: () => {
+        if (!nextOk) return;
+        if (st === 5) {
+          const tauri = window.__TAURI__;
+          if (!tauri) return;
+          tauri.core.invoke('finish_setup').catch((error) => this.fail(error));
+          return;
+        }
+        this.setState({ step: st + 1, note: '' });
+      },
+      back: () => this.setState({ step: Math.max(0, st - 1), note: '' }),
+    };
+  }
+}
+</script>
+</body>
+</html>
