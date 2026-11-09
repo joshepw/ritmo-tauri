@@ -3,3 +3,6 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/google.client.json
 .DS_Store
+.tauri/
+*.updater.key
+*.updater.password

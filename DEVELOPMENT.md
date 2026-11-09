@@ -50,9 +50,9 @@ Calendar arma Hoy, Próximos, la tarjeta siguiente y el texto de la bandeja. La 
 
 Google Tasks lista, crea y completa en la lista `@default`. «Atrasada» se calcula con la fecha de vencimiento. Apagar el servicio deja de llamarlo; Google no permite retirar un solo alcance sin cerrar la sesión.
 
-El Pomodoro persiste duraciones, sesión, pomodoros por tarea, pista y volumen. El descanso largo entra después de 4 enfoques. «Abrir al iniciar sesión» usa el plugin de autostart. El aviso (1, 5 o 10 min) y «abrir el enlace al empezar» salen del mismo reloj que la cuenta regresiva. Si empieza una reunión y el enfoque sigue corriendo, se pausa una vez por ese evento. El No molestar del sistema no está cableado: en macOS no hay un interruptor fiable, y la fila de preferencias lo explica.
+El Pomodoro persiste duraciones, sesión, pomodoros por tarea, pista y volumen. El descanso largo entra después de 4 enfoques. «Abrir al iniciar sesión» usa el plugin de autostart. El aviso (1, 5 o 10 min) y «abrir el enlace al empezar» salen del mismo reloj que la cuenta regresiva. Si empieza una reunión y el enfoque sigue corriendo, se pausa una vez por ese evento.
 
-Las notas son locales. Crear, listar y detectar enlaces usan la misma regla que el calendario. La API de Keep no sirve para este OAuth de escritorio: está limitada a cuentas Enterprise y a una cuenta de servicio. El interruptor no se simula; la fila explica por qué las notas se quedan en este equipo.
+Las notas son locales. Crear, listar y detectar enlaces usan la misma regla que el calendario.
 
 Gemini lee la agenda, las tareas y, si la preferencia lo permite, las notas ya cargadas. La clave va al llavero (`gemini-api-key`), nunca al binario. Sin clave, el resumen se arma en local con esos datos. El correo no tiene puerto, así que esa fila no pide permiso ni inventa asuntos.
 
@@ -67,6 +67,14 @@ macOS solo acepta la petición si el bundle está firmado como `app.ritmo.deskto
 El permiso se pide en el paso «Permisos de macOS» de la bienvenida (`ui/welcome.html`, comando `request_notifications`) o con «Probar aviso». Ritmo no lo pide solo al arrancar. La bienvenida se abre mientras `setupComplete` sea falso en `ritmo.json`.
 
 Con `tauri dev` no hay avisos: el binario no vive dentro de un `.app`.
+
+## Actualizaciones
+
+La app instalada consulta `latest.json` de la release pública en GitHub. Preferencias → Buscar comprueba la versión; Instalar descarga el paquete, verifica la firma y reinicia. Al abrir el panel, la misma consulta corre en silencio y solo avisa si hay una versión nueva.
+
+La clave pública vive en `tauri.conf.json`. La privada está en `~/.tauri/ritmo.key` y la contraseña en `~/.tauri/ritmo.password`. No se versionan. En GitHub son los secrets `TAURI_SIGNING_PRIVATE_KEY` y `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Si se pierde la privada, las instalaciones actuales no podrán verificar la siguiente actualización.
+
+Para publicar: sube la versión en `tauri.conf.json`, `Cargo.toml` y `package.json`, y crea el tag `vX.Y.Z`. El workflow `.github/workflows/release.yml` construye macOS arm64 e Intel y sube la release con `latest.json`.
 
 ## Qué no entra
 

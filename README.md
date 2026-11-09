@@ -24,6 +24,9 @@ npm run build      # .dmg/.app en macOS, .msi/.exe en Windows
 ```
 Para distribuir al equipo: firma con Developer ID y notariza en macOS; firma el instalador en Windows.
 
+## Actualizaciones
+Cada tag `vX.Y.Z` publica una release en GitHub. La app instalada lee `latest.json` de esa release, verifica la firma y se reemplaza. El detalle de la clave privada está en `DEVELOPMENT.md`.
+
 ## Actualizar la interfaz
 La UI vive en `ui/`. Al cambiar el diseño, copia de nuevo:
 - `Menu Bar Productividad v3.dc.html` → `ui/index.html`

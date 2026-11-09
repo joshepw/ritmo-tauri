@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::application::present::Snapshot;
 use crate::application::AppState;
@@ -8,6 +9,61 @@ use crate::application::AppState;
 #[tauri::command]
 pub fn quit(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDto {
+    pub available: bool,
+    pub current: String,
+    pub version: String,
+    pub notes: String,
+}
+
+fn update_error(err: impl std::fmt::Display) -> String {
+    let text = err.to_string();
+    let lower = text.to_lowercase();
+    if lower.contains("404") || lower.contains("not found") || lower.contains("release") {
+        return "Todavía no hay una versión publicada.".into();
+    }
+    if lower.contains("signature") || lower.contains("pubkey") || lower.contains("minisign") {
+        return "La actualización no pasó la verificación.".into();
+    }
+    format!("No se pudo buscar la actualización. {text}")
+}
+
+#[tauri::command]
+pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateDto, String> {
+    let current = app.package_info().version.to_string();
+    let updater = app.updater().map_err(update_error)?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateDto {
+            available: true,
+            current,
+            version: update.version,
+            notes: update.body.unwrap_or_default(),
+        }),
+        Ok(None) => Ok(UpdateDto {
+            available: false,
+            version: current.clone(),
+            notes: String::new(),
+            current,
+        }),
+        Err(err) => Err(update_error(err)),
+    }
+}
+
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(update_error)?;
+    let Some(update) = updater.check().await.map_err(update_error)? else {
+        return Err("Ya tienes la última versión.".into());
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(update_error)?;
+    app.restart();
 }
 
 fn failure(error: impl ToString) -> String {

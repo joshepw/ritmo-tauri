@@ -153,6 +153,40 @@
       } finally {
         component.setState({ booting: false });
       }
+      setTimeout(() => Ritmo.checkUpdate(component, true), 2500);
+    },
+    async checkUpdate(component, silent) {
+      if (component.state.updateChecking || component.state.updateInstalling) return;
+      component.setState({ updateChecking: true });
+      try {
+        const result = await invoke('check_update');
+        component.setState({
+          updateChecking: false,
+          appVersion: result.current || component.state.appVersion,
+          updateAvailable: !!result.available,
+          updateVersion: result.version || '',
+          updateNotes: result.notes || '',
+        });
+        if (!silent) {
+          toast(component, result.available ? 'Hay una versión nueva: ' + result.version : 'Ya tienes la última versión.');
+        } else if (result.available && !settingsSurface()) {
+          toast(component, 'Hay una actualización: ' + result.version + '. Instálala en Preferencias.');
+        }
+      } catch (error) {
+        component.setState({ updateChecking: false });
+        if (!silent) toast(component, error);
+      }
+    },
+    async installUpdate(component) {
+      if (component.state.updateInstalling) return;
+      component.setState({ updateInstalling: true });
+      toast(component, 'Descargando la actualización…');
+      try {
+        await invoke('install_update');
+      } catch (error) {
+        component.setState({ updateInstalling: false });
+        toast(component, error);
+      }
     },
     async patch(component, patch) {
       try {
@@ -407,6 +441,8 @@
         booting: false, signingIn: false,
         draft: '', factorialDraft: '', clickupDraft: '', taskAdding: false, taskHistory: false, freshTaskId: null, taskPulse: null, geminiKeySet: false, factorialKeySet: false, clickupKeySet: false, geminiKeyMask: '', factorialKeyMask: '', clickupKeyMask: '', clickupLoading: false, oauthConfigured: false,
         shortcutRecording: false,
+        appVersion: '0.1.0', updateAvailable: false, updateVersion: '', updateNotes: '',
+        updateChecking: false, updateInstalling: false,
       };
 
       componentDidMount() {
@@ -693,10 +729,23 @@
         const off = !state.connected;
         const groups = {
           general: [
-            { title: 'Acerca de', rows: [{ label: 'Ritmo 0.1.0', sub: 'Tu día, tus reuniones y tu enfoque en la barra de menú' }] },
+            { title: 'Acerca de', rows: [{ label: 'Ritmo ' + (state.appVersion || '0.1.0'), sub: 'Tu día, tus reuniones y tu enfoque en la barra de menú' }] },
             { title: 'Inicio', rows: [toggle('login', 'Abrir al iniciar sesión'), { isKey: true, label: 'Atajo para abrir el panel', sub: state.shortcutRecording ? 'Pulsa la combinación. Esc cancela.' : 'Pulsa el atajo para cambiarlo', value: state.shortcutRecording ? '…' : (prefs.shortcut || '⌥ ⌘ Espacio'), action: () => this.captureShortcut() }] },
             { title: 'Barra de menú', rows: [toggle('barTimer', 'Mostrar tiempo del pomodoro'), toggle('barMeeting', 'Mostrar cuenta regresiva de la próxima reunión'), choice('barMeetMin', 'Mostrar reuniones desde', ['15 min', '1 h', '12 h', '24 h', 'Hoy', 'Siempre'], 'Hoy muestra solo las que faltan hoy')] },
-            { title: 'App', rows: [{ isButton: true, label: 'Salir de la app', sub: '⌘Q', value: 'Salir', btnColor: '#ff6961', action: () => invoke('quit').catch(() => {}) }] },
+            { title: 'App', rows: [
+              {
+                isButton: true,
+                label: state.updateAvailable ? 'Actualizar a ' + state.updateVersion : 'Actualizaciones',
+                sub: state.updateInstalling ? 'Se descarga la versión nueva y Ritmo se reinicia' : state.updateAvailable ? (state.updateNotes || 'Hay una versión nueva en GitHub') : 'Busca en el repositorio público',
+                value: state.updateInstalling || state.updateChecking ? '…' : state.updateAvailable ? 'Instalar' : 'Buscar',
+                action: () => {
+                  if (state.updateInstalling || state.updateChecking) return;
+                  if (state.updateAvailable) Ritmo.installUpdate(this);
+                  else Ritmo.checkUpdate(this, false);
+                },
+              },
+              { isButton: true, label: 'Salir de la app', sub: '⌘Q', value: 'Salir', btnColor: '#ff6961', action: () => invoke('quit').catch(() => {}) },
+            ] },
           ],
           cuenta: [
             { title: 'Factorial', note: 'La clave es de la empresa. Ritmo busca tu ficha con el correo de Google.', rows: [

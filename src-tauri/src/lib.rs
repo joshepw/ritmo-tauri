@@ -15,6 +15,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = application::AppState::bootstrap(app.handle());
             app.manage(state.clone());
@@ -56,6 +57,8 @@ pub fn run() {
             commands::request_notifications,
             commands::notifications_allowed,
             commands::video_apps,
+            commands::check_update,
+            commands::install_update,
             commands::quit
         ])
         .on_window_event(|window, event| {
