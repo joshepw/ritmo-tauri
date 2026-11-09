@@ -7,7 +7,10 @@ pub mod preferences;
 pub mod records;
 pub mod timefmt;
 
-pub use briefing::{assistant_prompt, local_summary, should_prepare_summary, suggestions, DayContext, Suggestion};
+pub use briefing::{
+    assistant_prompt, keep_novel, local_summary, should_prepare_summary, split_briefing, suggestions, DayContext,
+    MailHint, Suggestion,
+};
 pub use error::AppError;
 pub use meeting::{open_message, open_target, MeetingKind, MeetingLink};
 pub use pomodoro::{FocusInterval, PhaseEnd, PomodoroMode, PomodoroState};

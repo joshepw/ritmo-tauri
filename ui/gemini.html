@@ -19,8 +19,8 @@ button:hover{background:rgba(255,255,255,.1)}
 h2{margin:0;font-size:11px;font-weight:600;color:rgba(235,235,245,.5)}
 .sug{display:flex;align-items:center;gap:10px;padding:8px 4px;border-radius:10px;cursor:default}
 .sug:hover{background:#151515}
-.icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none}
-.sug div{flex:1;min-width:0}
+.sug .icon{width:28px;height:28px;min-width:28px;max-width:28px;aspect-ratio:1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none;box-sizing:border-box}
+.sug .copy{flex:1;min-width:0}
 .sug b{display:block;font-weight:500;font-size:13px}
 .sug small{color:rgba(235,235,245,.55);font-size:11.5px}
 .cta{color:#0a84ff;font-size:12px;font-weight:500}
@@ -76,15 +76,25 @@ function setBusy(text) {
   if (text) statusText.textContent = text;
 }
 
-async function loadSummary() {
-  setBusy('Revisando tu día…');
-  try {
-    const result = await invoke('assistant_summary', { manual: true });
-    summary.textContent = result.text || '';
-  } catch (error) {
-    summary.textContent = String(error && error.message || error || 'No se pudo preparar el resumen.');
+function showBriefing(payload) {
+  const text = payload && payload.text;
+  if (text) summary.textContent = text;
+  if (payload && payload.running) {
+    setBusy('Revisando tu día…');
+    return;
   }
   setBusy('');
+  loadSuggestions();
+}
+
+async function loadSummary(force) {
+  try {
+    const result = await invoke('assistant_summary', { manual: !!force });
+    showBriefing(result);
+  } catch (error) {
+    summary.textContent = String(error && error.message || error || 'No se pudo preparar el resumen.');
+    setBusy('');
+  }
 }
 
 async function loadSuggestions() {
@@ -94,7 +104,7 @@ async function loadSuggestions() {
     for (const item of snap.suggestions || []) {
       const row = document.createElement('div');
       row.className = 'sug';
-      row.innerHTML = '<div class="icon"></div><div><b></b><small></small></div><span class="cta"></span>';
+      row.innerHTML = '<div class="icon"></div><div class="copy"><b></b><small></small></div><span class="cta"></span>';
       row.querySelector('.icon').textContent = item.icon || '·';
       row.querySelector('.icon').style.background = item.bg || 'rgba(255,255,255,.08)';
       row.querySelector('.icon').style.color = item.color || '#f5f5f7';
@@ -110,6 +120,10 @@ async function loadSuggestions() {
 }
 
 async function runSuggestion(item) {
+  if (item.action === 'open-url' || item.action === 'open-mail') {
+    if (item.targetId) await invoke('open_meeting', { url: item.targetId });
+    return;
+  }
   if (item.action === 'open-notes') {
     await tauri.event.emit('ritmo-surface', 'open-notes');
     return;
@@ -148,11 +162,10 @@ document.getElementById('ask').addEventListener('submit', async (event) => {
   setBusy('');
 });
 
-document.getElementById('refresh').addEventListener('click', () => { loadSummary(); loadSuggestions(); });
+document.getElementById('refresh').addEventListener('click', () => { loadSummary(true); });
 document.getElementById('close').addEventListener('click', () => invoke('hide_gemini_window'));
 
-loadSummary();
-loadSuggestions();
+tauri.event.listen('ritmo-briefing', (event) => showBriefing(event.payload)).then(() => loadSummary(false));
 </script>
 </body>
 </html>

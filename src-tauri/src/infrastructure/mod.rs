@@ -2,6 +2,7 @@ pub mod clickup;
 pub mod clock;
 pub mod factorial;
 pub mod google;
+pub mod gravatar;
 pub mod links;
 pub mod oauth;
 pub mod persist;

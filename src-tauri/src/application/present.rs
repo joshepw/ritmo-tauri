@@ -24,6 +24,7 @@ pub struct Snapshot {
     pub account_name: String,
     pub account_email: String,
     pub account_initials: String,
+    pub account_avatar: String,
     pub account_status: String,
     pub account_status_color: String,
     pub weekday_label: String,
@@ -209,6 +210,7 @@ pub struct PrefsDto {
     pub ai_time: String,
     pub ai_suggest: bool,
     pub ai_notes: bool,
+    pub read_mail: bool,
     pub svc_cal: bool,
     pub svc_tasks: bool,
     pub svc_chat: bool,
@@ -250,6 +252,9 @@ pub struct PresentInput<'a> {
     pub clickup_tasks: &'a [TaskItem],
     pub links: &'a HashMap<String, MeetingLink>,
     pub links_pending: bool,
+    pub account_avatar: String,
+    pub mail: &'a [crate::domain::MailHint],
+    pub ai_suggestions: &'a [Suggestion],
 }
 
 pub fn present(input: PresentInput<'_>) -> Snapshot {
@@ -274,6 +279,7 @@ pub fn present(input: PresentInput<'_>) -> Snapshot {
         account_name: name.clone(),
         account_email: email,
         account_initials: initials(&name),
+        account_avatar: input.account_avatar.clone(),
         account_status: status,
         account_status_color: status_color,
         weekday_label: format_weekday(input.now),
@@ -321,19 +327,25 @@ pub fn present(input: PresentInput<'_>) -> Snapshot {
             })
             .collect(),
         pomodoro: pomodoro_dto(input.pomodoro, input.prefs),
-        suggestions: crate::domain::suggestions(
-            &crate::domain::DayContext {
-                now: input.now,
-                events: input.events,
-                tasks: input.tasks,
-                notes: input.notes,
-                connected,
-            },
-            input.prefs,
-        )
-        .into_iter()
-        .map(suggestion_dto)
-        .collect(),
+        suggestions: {
+            let local = crate::domain::suggestions(
+                &crate::domain::DayContext {
+                    now: input.now,
+                    events: input.events,
+                    tasks: input.tasks,
+                    notes: input.notes,
+                    mail: input.mail,
+                    connected,
+                },
+                input.prefs,
+            );
+            let chosen = if input.ai_suggestions.is_empty() {
+                local
+            } else {
+                input.ai_suggestions.to_vec()
+            };
+            chosen.into_iter().map(suggestion_dto).collect()
+        },
         preferences: prefs_dto(input.prefs),
         gemini_key_set: input.gemini_key_set,
         factorial_key_set: input.factorial_key_set,
@@ -562,6 +574,7 @@ fn prefs_dto(prefs: &Preferences) -> PrefsDto {
         ai_time: prefs.assistant_when.clone(),
         ai_suggest: prefs.assistant_suggest,
         ai_notes: prefs.assistant_reads_notes,
+        read_mail: prefs.read_mail,
         svc_cal: prefs.service_calendar,
         svc_tasks: prefs.service_tasks,
         svc_chat: prefs.service_chat,

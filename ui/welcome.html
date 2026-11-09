@@ -87,7 +87,12 @@ html,body{margin:0;height:100%;background:#0c0c0c;color:#f5f5f7;font-family:-app
         </sc-if>
         <sc-if value="{{ gDone }}">
           <div style="display:flex;align-items:center;gap:14px;padding:16px;border-radius:14px;background:#151515;border:.5px solid rgba(255,255,255,.08)">
-            <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#4f8dff,#b98cff);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">{{ accountInitials }}</div>
+            <sc-if value="{{ hasAvatar }}">
+              <img src="{{ accountAvatar }}" alt="" style="width:52px;height:52px;border-radius:50%;object-fit:cover;display:block">
+            </sc-if>
+            <sc-if value="{{ noAvatar }}">
+              <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#4f8dff,#b98cff);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">{{ accountInitials }}</div>
+            </sc-if>
             <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
               <span style="font-size:15px;font-weight:600">{{ accountName }}</span>
               <span style="font-size:13px;color:rgba(235,235,245,.6)">{{ accountEmail }}</span>
@@ -265,7 +270,7 @@ html,body{margin:0;height:100%;background:#0c0c0c;color:#f5f5f7;font-family:-app
 class Component extends DCLogic {
   state = {
     step: 0, google: 'idle', tick: 0, note: '',
-    accountName: '', accountEmail: '', accountInitials: 'G',
+    accountName: '', accountEmail: '', accountInitials: 'G', accountAvatar: '',
     svc: { cal: true, tasks: false, gemini: false },
     perm: { notif: false, login: false, shortcut: false },
     shortcut: '⌥ ⌘ Espacio',
@@ -289,6 +294,7 @@ class Component extends DCLogic {
         accountName: snap.connected ? (snap.accountName || 'Cuenta de Google') : '',
         accountEmail: snap.connected ? email : '',
         accountInitials: snap.accountInitials || 'G',
+        accountAvatar: snap.accountAvatar || '',
         svc: { cal: p.svcCal !== false, tasks: !!p.svcTasks, gemini: !!p.svcGemini },
         shortcut: p.shortcut || '⌥ ⌘ Espacio',
         pref: {
@@ -419,6 +425,7 @@ class Component extends DCLogic {
       ],
       gIdle: s.google === 'idle', gConnecting: s.google === 'connecting', gDone,
       accountName: s.accountName, accountEmail: s.accountEmail, accountInitials: s.accountInitials,
+      hasAvatar: !!s.accountAvatar, noAvatar: !s.accountAvatar, accountAvatar: s.accountAvatar || '',
       waitDots: [0, 1, 2].map((i) => ({ op: s.tick % 3 === i ? 1 : 0.3 })),
       connectGoogle: () => {
         const tauri = window.__TAURI__;
@@ -431,6 +438,7 @@ class Component extends DCLogic {
             accountName: snap.accountName || 'Cuenta de Google',
             accountEmail: email,
             accountInitials: snap.accountInitials || 'G',
+            accountAvatar: snap.accountAvatar || '',
             note: '',
           });
         }).catch((error) => this.fail(error));

@@ -76,6 +76,13 @@ pub struct TextDto {
     pub text: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BriefingDto {
+    pub text: String,
+    pub running: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenDto {
@@ -161,17 +168,9 @@ pub async fn open_meeting(state: State<'_, AppState>, url: String) -> Result<Ope
 pub async fn assistant_summary(
     state: State<'_, AppState>,
     manual: Option<bool>,
-) -> Result<TextDto, String> {
-    let text = if manual.unwrap_or(true) {
-        state.inner.summary().await
-    } else {
-        state
-            .inner
-            .prepare_summary_if_due()
-            .await
-            .unwrap_or_default()
-    };
-    Ok(TextDto { text })
+) -> Result<BriefingDto, String> {
+    let (text, running) = state.inner.request_summary(manual.unwrap_or(true)).await;
+    Ok(BriefingDto { text, running })
 }
 
 #[tauri::command]

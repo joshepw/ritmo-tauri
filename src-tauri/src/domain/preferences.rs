@@ -47,6 +47,8 @@ pub struct Preferences {
     pub assistant_when: String,
     pub assistant_suggest: bool,
     pub assistant_reads_notes: bool,
+    #[serde(default)]
+    pub read_mail: bool,
     pub service_calendar: bool,
     pub service_tasks: bool,
     pub service_chat: bool,
@@ -92,6 +94,7 @@ impl Default for Preferences {
             assistant_when: "Al abrir".into(),
             assistant_suggest: true,
             assistant_reads_notes: true,
+            read_mail: false,
             service_calendar: true,
             service_tasks: false,
             service_chat: false,
@@ -105,7 +108,7 @@ impl Default for Preferences {
 }
 
 fn default_chat_ui() -> String {
-    "iframe".into()
+    "Ventana".into()
 }
 
 fn default_panel_shortcut() -> String {
@@ -204,9 +207,12 @@ pub fn shortcut_label(spec: &str) -> String {
 }
 
 pub fn migrate_chat_ui(prefs: &mut Preferences) {
-    if prefs.chat_ui != "iframe" && prefs.chat_ui != "Enlace" {
-        prefs.chat_ui = "iframe".into();
-    }
+    let next = match prefs.chat_ui.as_str() {
+        "Ventana" | "Navegador" => return,
+        "Enlace" => "Navegador",
+        _ => "Ventana",
+    };
+    prefs.chat_ui = next.into();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -293,9 +299,9 @@ pub fn apply_pref_patch(
             "chatUi" => {
                 let value = expect_str(value)?;
                 prefs.chat_ui = match value {
-                    "iframe" | "Enlace" => value.to_string(),
-                    "Nativa" => "iframe".into(),
-                    _ => return Err(AppError::message("Elige iframe o Enlace.")),
+                    "Ventana" | "iframe" | "Nativa" => "Ventana".into(),
+                    "Navegador" | "Enlace" => "Navegador".into(),
+                    _ => return Err(AppError::message("Elige Ventana o Navegador.")),
                 };
             }
             "breathCycles" => prefs.breath_cycles = expect_u32(value)?.clamp(1, 12) as u8,
@@ -303,6 +309,15 @@ pub fn apply_pref_patch(
             "aiTime" => prefs.assistant_when = expect_str(value)?.to_string(),
             "aiSuggest" => prefs.assistant_suggest = expect_bool(value)?,
             "aiNotes" => prefs.assistant_reads_notes = expect_bool(value)?,
+            "readMail" => {
+                let enabled = expect_bool(value)?;
+                if enabled && !prefs.read_mail {
+                    effects.push(PrefEffect::NeedsScope(
+                        "https://www.googleapis.com/auth/gmail.readonly".into(),
+                    ));
+                }
+                prefs.read_mail = enabled;
+            }
             "svcCal" => prefs.service_calendar = expect_bool(value)?,
             "svcTasks" => {
                 let enabled = expect_bool(value)?;
@@ -324,11 +339,6 @@ pub fn apply_pref_patch(
             "svcGemini" => prefs.service_gemini = expect_bool(value)?,
             "svcFactorial" => prefs.service_factorial = expect_bool(value)?,
             "svcClickup" => prefs.service_clickup = expect_bool(value)?,
-            "aiMail" => {
-                return Err(AppError::message(
-                    "Esa opción todavía no tiene un servicio detrás.",
-                ));
-            }
             other => {
                 return Err(AppError::message(format!(
                     "Preferencia desconocida: {other}"
@@ -606,6 +616,9 @@ pub fn scopes_for(prefs: &Preferences) -> Vec<String> {
     if prefs.service_tasks {
         scopes.push("https://www.googleapis.com/auth/tasks".into());
     }
+    if prefs.read_mail {
+        scopes.push("https://www.googleapis.com/auth/gmail.readonly".into());
+    }
     scopes
 }
 
@@ -676,19 +689,19 @@ mod tests {
     }
 
     #[test]
-    fn chat_ui_defaults_to_iframe_and_migrates_native() {
+    fn chat_ui_defaults_to_ventana_and_migrates_iframe() {
         let mut value = serde_json::to_value(Preferences::default()).unwrap();
         value.as_object_mut().unwrap().remove("chatUi");
         let mut prefs: Preferences = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(prefs.chat_ui, "iframe");
-        value["chatUi"] = json!("Nativa");
+        assert_eq!(prefs.chat_ui, "Ventana");
+        value["chatUi"] = json!("iframe");
         let mut stored: Preferences = serde_json::from_value(value).unwrap();
         migrate_chat_ui(&mut stored);
-        assert_eq!(stored.chat_ui, "iframe");
+        assert_eq!(stored.chat_ui, "Ventana");
         apply_pref_patch(&mut prefs, json!({ "chatUi": "Enlace" }).as_object().unwrap()).unwrap();
-        assert_eq!(prefs.chat_ui, "Enlace");
+        assert_eq!(prefs.chat_ui, "Navegador");
         apply_pref_patch(&mut prefs, json!({ "chatUi": "Nativa" }).as_object().unwrap()).unwrap();
-        assert_eq!(prefs.chat_ui, "iframe");
+        assert_eq!(prefs.chat_ui, "Ventana");
         assert!(apply_pref_patch(&mut prefs, json!({ "chatUi": "webview" }).as_object().unwrap()).is_err());
     }
 

@@ -19,8 +19,8 @@ input::placeholder{color:rgba(235,235,245,.38)}
 <div style="height:100vh;display:flex;flex-direction:column;position:relative;background:#0c0c0c">
   <div style="padding:12px 16px 10px;display:flex;justify-content:center;border-bottom:.5px solid rgba(255,255,255,.1);flex:none">
     <div style="display:flex;gap:2px">
-      <sc-for list="{{ prefTabs }}" as="pt" hint-placeholder-count="5">
-        <div onClick="{{ pt.select }}" style="width:76px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;background:{{ pt.bg }}" style-hover="background:rgba(255,255,255,.07)">
+      <sc-for list="{{ prefTabs }}" as="pt" hint-placeholder-count="6">
+        <div onClick="{{ pt.select }}" style="width:64px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;background:{{ pt.bg }}" style-hover="background:rgba(255,255,255,.07)">
           <div style="width:26px;height:26px;border-radius:7px;background:{{ pt.iconBg }};color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;font-weight:600">{{ pt.icon }}</div>
           <span style="font-size:11px;color:{{ pt.fg }}">{{ pt.label }}</span>
         </div>
@@ -30,7 +30,12 @@ input::placeholder{color:rgba(235,235,245,.38)}
   <div style="flex:1;overflow-y:auto;padding:18px 22px 22px;display:flex;flex-direction:column;gap:18px">
     <sc-if value="{{ isAccountTab }}">
       <div style="display:flex;align-items:center;gap:14px;padding:14px;border-radius:12px;background:#151515;border:.5px solid rgba(255,255,255,.08)">
-        <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#4f8dff,#b98cff);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;flex:none">{{ accountInitials }}</div>
+        <sc-if value="{{ hasAvatar }}">
+          <img src="{{ accountAvatar }}" alt="" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex:none;display:block">
+        </sc-if>
+        <sc-if value="{{ noAvatar }}">
+          <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#4f8dff,#b98cff);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;flex:none">{{ accountInitials }}</div>
+        </sc-if>
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
           <span style="font-size:15px;font-weight:600">{{ accountName }}</span>
           <span style="font-size:12.5px;color:rgba(235,235,245,.6)">{{ accountEmail }}</span>

@@ -144,6 +144,15 @@ pub struct Inner {
     clickup_team: Mutex<Option<String>>,
     clickup_loading: AtomicBool,
     app: AppHandle,
+    mail_cache: Mutex<Vec<crate::domain::MailHint>>,
+    ai_suggestions: Mutex<Vec<crate::domain::Suggestion>>,
+    avatar: Mutex<(String, String)>,
+    briefing: Mutex<Briefing>,
+}
+
+struct Briefing {
+    text: String,
+    running: bool,
 }
 
 #[derive(Clone)]
@@ -198,6 +207,13 @@ impl AppState {
             clickup_team: Mutex::new(disk.clickup_team_id.clone()),
             clickup_loading: AtomicBool::new(false),
             app: app.clone(),
+            mail_cache: Mutex::new(Vec::new()),
+            ai_suggestions: Mutex::new(Vec::new()),
+            avatar: Mutex::new((String::new(), String::new())),
+            briefing: Mutex::new(Briefing {
+                text: String::new(),
+                running: false,
+            }),
         });
         let state = Self { inner };
         if disk.preferences.open_at_login {
@@ -251,6 +267,16 @@ impl Inner {
         let factorial_events = self.factorial_events.lock().await.clone();
         let clickup_tasks = self.clickup_tasks.lock().await.clone();
         let (links, links_pending) = self.agenda_links().await;
+        let account_avatar = match account.as_ref() {
+            Some(account) if !account.email.is_empty() => self.account_avatar(&account.email).await,
+            _ => String::new(),
+        };
+        let mail = if prefs.read_mail {
+            self.mail_cache.lock().await.clone()
+        } else {
+            Vec::new()
+        };
+        let ai_suggestions = self.ai_suggestions.lock().await.clone();
         present(PresentInput {
             now,
             prefs: &prefs,
@@ -274,7 +300,29 @@ impl Inner {
             clickup_tasks: &clickup_tasks,
             links: &links,
             links_pending,
+            account_avatar,
+            mail: &mail,
+            ai_suggestions: &ai_suggestions,
         })
+    }
+
+    async fn account_avatar(&self, email: &str) -> String {
+        let email = email.trim().to_lowercase();
+        {
+            let cached = self.avatar.lock().await;
+            if cached.0 == email {
+                return cached.1.clone();
+            }
+        }
+        let cache = self
+            .app
+            .path()
+            .app_cache_dir()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join("gravatar");
+        let url = crate::infrastructure::gravatar::load(&self.http, &cache, &email).await;
+        *self.avatar.lock().await = (email, url.clone());
+        url
     }
 
     async fn agenda_links(&self) -> (HashMap<String, MeetingLink>, bool) {
@@ -539,17 +587,28 @@ impl Inner {
         Ok(open_message(&link, opener))
     }
 
-    pub async fn summary(&self) -> String {
-        self.summarize(true).await
-    }
-
-    pub async fn prepare_summary_if_due(&self) -> Option<String> {
-        let prefs = self.prefs.lock().await.clone();
-        if should_prepare_summary(self.clock.now(), &prefs) {
-            Some(self.summarize(false).await)
-        } else {
-            None
-        }
+    /// Starts the day analysis away from the window that asked for it.
+    /// A running query is left alone, and its text stays until the new one arrives.
+    pub async fn request_summary(self: &Arc<Self>, force: bool) -> (String, bool) {
+        let previous = {
+            let mut job = self.briefing.lock().await;
+            if job.running || (!force && !job.text.is_empty()) {
+                return (job.text.clone(), job.running);
+            }
+            job.running = true;
+            job.text.clone()
+        };
+        let inner = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            let text = inner.summarize(true).await;
+            {
+                let mut job = inner.briefing.lock().await;
+                job.text = text.clone();
+                job.running = false;
+            }
+            let _ = inner.app.emit("ritmo-briefing", serde_json::json!({ "text": text, "running": false }));
+        });
+        (previous, true)
     }
 
     pub async fn ask(&self, question: &str) -> Result<String, AppError> {
@@ -965,43 +1024,84 @@ impl Inner {
         if !manual && !should_prepare_summary(now, &prefs) {
             return String::new();
         }
-        let (system, prompt, local) = self.prompt_parts("Resume el resto de mi día en 2 o 3 frases cortas, sin listas ni markdown.").await;
+        let question = "Escribe un párrafo de cinco o seis frases sobre cómo viene el día, los huecos y, si hay correo reciente, lo que ese correo pide y todavía no está en la agenda ni en las tareas. No repitas la lista de reuniones ni de tareas. No inventes mensajes. Después, solo si el correo trae algo que la app no muestra, escribe hasta tres líneas con el formato SUGERENCIA|título|detalle|cta. Cada sugerencia es una acción nueva: responder, preparar o dar seguimiento. Si el correo está vacío, no escribas líneas SUGERENCIA.";
+        let (system, prompt, local, events, tasks) = self.prompt_parts(question).await;
         if !prefs.service_gemini {
+            self.ai_suggestions.lock().await.clear();
             return local;
         }
         let key = self.secrets.get(oauth::GEMINI_KEY).ok().flatten().unwrap_or_default();
         let assistant = GeminiAssistant::new(self.http.clone(), key);
         if !assistant.has_key() {
+            self.ai_suggestions.lock().await.clear();
             return local;
         }
-        assistant
-            .complete(&system, &prompt)
-            .await
-            .unwrap_or(local)
+        match assistant.complete(&system, &prompt).await {
+            Ok(text) => {
+                let (summary, ideas) = crate::domain::split_briefing(&text);
+                *self.ai_suggestions.lock().await = crate::domain::keep_novel(ideas, &events, &tasks);
+                if summary.is_empty() { text } else { summary }
+            }
+            Err(_) => {
+                self.ai_suggestions.lock().await.clear();
+                local
+            }
+        }
     }
 
     async fn prompt(&self, question: &str) -> (String, String) {
-        let (system, prompt, _) = self.prompt_parts(question).await;
+        let (system, prompt, _, _, _) = self.prompt_parts(question).await;
         (system, prompt)
     }
 
-    async fn prompt_parts(&self, question: &str) -> (String, String, String) {
+    async fn prompt_parts(
+        &self,
+        question: &str,
+    ) -> (String, String, String, Vec<crate::domain::CalendarEvent>, Vec<crate::domain::TaskItem>) {
         let now = self.clock.now();
         let prefs = self.prefs.lock().await.clone();
         let events = self.events.lock().await.clone();
         let tasks = self.tasks.lock().await.clone();
         let notes = self.notes.lock().await.clone();
         let connected = self.account.lock().await.is_some();
+        let mail = self.load_mail(&prefs).await;
         let ctx = DayContext {
             now,
             events: &events,
             tasks: &tasks,
             notes: &notes,
+            mail: &mail,
             connected,
         };
         let local = local_summary(&ctx, &prefs);
         let (system, prompt) = assistant_prompt(&ctx, &prefs, question);
-        (system, prompt, local)
+        (system, prompt, local, events, tasks)
+    }
+
+    async fn load_mail(&self, prefs: &crate::domain::Preferences) -> Vec<crate::domain::MailHint> {
+        if !prefs.read_mail {
+            self.mail_cache.lock().await.clear();
+            return Vec::new();
+        }
+        let allowed = self
+            .account
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|account| account.scopes.iter().any(|scope| scope.contains("gmail.readonly")));
+        if !allowed {
+            return self.mail_cache.lock().await.clone();
+        }
+        let Ok(api) = self.api().await else {
+            return self.mail_cache.lock().await.clone();
+        };
+        match api.recent_mail().await {
+            Ok(mail) => {
+                *self.mail_cache.lock().await = mail.clone();
+                mail
+            }
+            Err(_) => self.mail_cache.lock().await.clone(),
+        }
     }
 
     async fn meeting_side_effects(&self, prefs: &Preferences, now: DateTime<Local>) {

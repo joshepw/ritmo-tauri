@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 
 use crate::domain::{
-    AppError, AssistantPort, CalendarPort, EventChange, RemoteCalendar, SyncPage, SyncRequest, TaskItem,
+    AppError, AssistantPort, CalendarPort, EventChange, MailHint, RemoteCalendar, SyncPage, SyncRequest, TaskItem,
     TaskPort,
 };
 
@@ -357,7 +357,7 @@ async fn gemini_complete(
         .json(&serde_json::json!({
             "systemInstruction": { "parts": [{ "text": system }] },
             "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
-            "generationConfig": { "maxOutputTokens": 400, "temperature": 0.4 }
+            "generationConfig": { "maxOutputTokens": 800, "temperature": 0.4 }
         }))
         .send()
         .await
@@ -382,9 +382,98 @@ async fn gemini_complete(
         .ok_or_else(|| AppError::message("Gemini no devolvió texto."))
 }
 
+impl GoogleApi {
+    pub async fn recent_mail(&self) -> Result<Vec<MailHint>, AppError> {
+        let list = self
+            .send(
+                reqwest::Method::GET,
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=8&q=in%3Ainbox%20newer_than%3A2d%20-category%3Apromotions%20-category%3Asocial",
+                None,
+            )
+            .await?;
+        let ids = list
+            .get("messages")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("id").and_then(|id| id.as_str()).map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut mail = Vec::new();
+        for id in ids.into_iter().take(8) {
+            let url = format!(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject"
+            );
+            let body = self.send(reqwest::Method::GET, &url, None).await?;
+            if let Some(hint) = parse_mail_message(&id, &body) {
+                mail.push(hint);
+            }
+        }
+        Ok(mail)
+    }
+}
+
+pub fn parse_mail_message(id: &str, body: &serde_json::Value) -> Option<MailHint> {
+    let headers = body.pointer("/payload/headers")?.as_array()?;
+    let header = |name: &str| {
+        headers.iter().find_map(|item| {
+            let key = item.get("name").and_then(|value| value.as_str())?;
+            if key.eq_ignore_ascii_case(name) {
+                item.get("value").and_then(|value| value.as_str())
+            } else {
+                None
+            }
+        })
+    };
+    let subject = header("Subject").unwrap_or("").trim();
+    if subject.is_empty() {
+        return None;
+    }
+    let from = header("From").unwrap_or("");
+    let snippet = body.get("snippet").and_then(|value| value.as_str()).unwrap_or("");
+    let mut snippet = snippet.split_whitespace().collect::<Vec<_>>().join(" ");
+    if snippet.chars().count() > 140 {
+        snippet = snippet.chars().take(140).collect::<String>() + "…";
+    }
+    Some(MailHint {
+        id: id.to_string(),
+        from_name: display_name(from),
+        subject: subject.to_string(),
+        snippet,
+    })
+}
+
+fn display_name(from: &str) -> String {
+    let from = from.trim();
+    if let Some(end) = from.find('<') {
+        let name = from[..end].trim().trim_matches('"');
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    from.trim_matches(|ch| ch == '<' || ch == '>').to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_a_mail_header_without_the_body() {
+        let value = serde_json::json!({
+            "snippet": "Queda  pendiente el comprobante",
+            "payload": { "headers": [
+                { "name": "From", "value": "\"Contabilidad\" <ana@empresa.test>" },
+                { "name": "Subject", "value": "Factura de marzo" }
+            ]}
+        });
+        let mail = parse_mail_message("msg-1", &value).unwrap();
+        assert_eq!(mail.from_name, "Contabilidad");
+        assert_eq!(mail.subject, "Factura de marzo");
+        assert_eq!(mail.snippet, "Queda pendiente el comprobante");
+    }
 
     #[test]
     fn parses_a_timed_event_and_a_declined_attendee() {

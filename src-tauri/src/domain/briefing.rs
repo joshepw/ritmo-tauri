@@ -16,11 +16,20 @@ pub struct Suggestion {
     pub target_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MailHint {
+    pub id: String,
+    pub from_name: String,
+    pub subject: String,
+    pub snippet: String,
+}
+
 pub struct DayContext<'a> {
     pub now: DateTime<Local>,
     pub events: &'a [CalendarEvent],
     pub tasks: &'a [TaskItem],
     pub notes: &'a [Note],
+    pub mail: &'a [MailHint],
     pub connected: bool,
 }
 
@@ -64,6 +73,19 @@ pub fn local_summary(ctx: &DayContext<'_>, prefs: &Preferences) -> String {
             if open.len() == 1 { "" } else { "s" }
         ));
     }
+    let fresh = novel_mail(ctx);
+    if !fresh.is_empty() {
+        let subjects = fresh
+            .iter()
+            .take(3)
+            .map(|mail| mail.subject.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(format!(
+            "En el correo hay {} que no aparecen en la agenda ni en las tareas: {subjects}.",
+            if fresh.len() == 1 { "algo" } else { "cosas" }
+        ));
+    }
     parts.join(" ")
 }
 
@@ -71,60 +93,90 @@ pub fn suggestions(ctx: &DayContext<'_>, prefs: &Preferences) -> Vec<Suggestion>
     if !prefs.assistant_suggest {
         return Vec::new();
     }
-    let mut items = Vec::new();
-    let open: Vec<&TaskItem> = ctx.tasks.iter().filter(|task| !task.done).collect();
-    if let Some(gap) = free_gap_minutes(ctx.now, ctx.events) {
-        if gap >= i64::from(prefs.focus_minutes) {
-            if let Some(task) = open.first() {
-                items.push(Suggestion {
-                    icon: "◎".into(),
-                    bg: "rgba(255,69,58,.2)".into(),
-                    color: "#ff453a".into(),
-                    title: format!("Pomodoro de {} min", prefs.focus_minutes),
-                    when_label: format!("Para {}", task.title),
-                    cta: "Iniciar".into(),
-                    action: "start-pomodoro".into(),
-                    target_id: task.id.clone(),
-                });
-            }
-        }
-    }
-    let agenda = build_agenda(ctx.now, ctx.events, prefs, ctx.connected);
-    if !agenda.next.event_id.is_empty() {
-        items.push(Suggestion {
-            icon: "▤".into(),
-            bg: "rgba(10,132,255,.2)".into(),
-            color: "#0a84ff".into(),
-            title: format!("Preparar {}", agenda.next.title),
-            when_label: agenda.next.meta.clone(),
-            cta: "Notas".into(),
-            action: "open-notes".into(),
-            target_id: String::new(),
-        });
-    }
-    if let Some(late) = open
-        .iter()
-        .filter(|task| task.due.is_some_and(|due| due < ctx.now.date_naive()))
-        .min_by_key(|task| task.due)
-    {
-        items.push(Suggestion {
-            icon: "!".into(),
-            bg: "rgba(255,159,10,.2)".into(),
-            color: "#ff9f0a".into(),
-            title: late.title.clone(),
-            when_label: "Tarea atrasada".into(),
-            cta: "Enfocar".into(),
-            action: "focus-task".into(),
-            target_id: late.id.clone(),
-        });
-    }
-    let _ = ctx.notes;
-    items.truncate(3);
+    novel_mail(ctx)
+        .into_iter()
+        .take(3)
+        .map(|mail| Suggestion {
+            icon: "✉".into(),
+            bg: "rgba(255,255,255,.08)".into(),
+            color: "#f5f5f7".into(),
+            title: format!("Responder a {}", mail.from_name),
+            when_label: mail.subject.clone(),
+            cta: "Abrir".into(),
+            action: "open-url".into(),
+            target_id: format!("https://mail.google.com/mail/u/0/#inbox/{}", mail.id),
+        })
+        .collect()
+}
+
+pub fn keep_novel(items: Vec<Suggestion>, events: &[CalendarEvent], tasks: &[TaskItem]) -> Vec<Suggestion> {
     items
+        .into_iter()
+        .filter(|item| !already_shown(&item.title, events, tasks) && !already_shown(&item.when_label, events, tasks))
+        .take(3)
+        .collect()
+}
+
+/// Splits a Gemini reply into the paragraph and the new suggestions.
+pub fn split_briefing(text: &str) -> (String, Vec<Suggestion>) {
+    let mut summary = Vec::new();
+    let mut items = Vec::new();
+    for line in text.lines() {
+        let line = line.trim().trim_matches('`');
+        let Some(rest) = line.strip_prefix("SUGERENCIA|") else {
+            if !line.is_empty() && !line.eq_ignore_ascii_case("json") {
+                summary.push(line);
+            }
+            continue;
+        };
+        let mut parts = rest.splitn(3, '|');
+        let title = parts.next().unwrap_or("").trim();
+        let detail = parts.next().unwrap_or("").trim();
+        let cta = parts.next().unwrap_or("Abrir").trim();
+        if title.is_empty() {
+            continue;
+        }
+        items.push(Suggestion {
+            icon: "✉".into(),
+            bg: "rgba(255,255,255,.08)".into(),
+            color: "#f5f5f7".into(),
+            title: title.to_string(),
+            when_label: detail.to_string(),
+            cta: if cta.is_empty() { "Abrir".into() } else { cta.to_string() },
+            action: "open-mail".into(),
+            target_id: format!(
+                "https://mail.google.com/mail/u/0/#search/{}",
+                urlencoding::encode(title)
+            ),
+        });
+    }
+    (summary.join(" "), items)
+}
+
+fn novel_mail<'a>(ctx: &'a DayContext<'_>) -> Vec<&'a MailHint> {
+    ctx.mail
+        .iter()
+        .filter(|mail| !mail.subject.trim().is_empty())
+        .filter(|mail| !already_shown(&mail.subject, ctx.events, ctx.tasks))
+        .collect()
+}
+
+fn already_shown(text: &str, events: &[CalendarEvent], tasks: &[TaskItem]) -> bool {
+    let text = text.trim().to_lowercase();
+    if text.len() < 6 {
+        return false;
+    }
+    events.iter().any(|event| overlaps(&text, &event.title))
+        || tasks.iter().filter(|task| !task.done).any(|task| overlaps(&text, &task.title))
+}
+
+fn overlaps(left: &str, title: &str) -> bool {
+    let title = title.trim().to_lowercase();
+    title.len() >= 6 && (left.contains(&title) || title.contains(left))
 }
 
 pub fn assistant_prompt(ctx: &DayContext<'_>, prefs: &Preferences, question: &str) -> (String, String) {
-    let system = "Eres Gemini, asistente de oficina. Hablas español neutro, tuteando, conciso. No uses markdown.".to_string();
+    let system = "Eres el asistente de Ritmo. Hablas español neutro y tuteas. No uses markdown. No inventes reuniones, tareas ni correos.".into();
     let summary = local_summary(ctx, prefs);
     let tasks = ctx
         .tasks
@@ -142,8 +194,14 @@ pub fn assistant_prompt(ctx: &DayContext<'_>, prefs: &Preferences, question: &st
             .collect::<Vec<_>>()
             .join("\n");
     }
+    let mail = ctx
+        .mail
+        .iter()
+        .map(|item| format!("- De {}: {} — {}", item.from_name, item.subject, item.snippet))
+        .collect::<Vec<_>>()
+        .join("\n");
     let prompt = format!(
-        "Contexto real de la cuenta:\n{summary}\nTareas:\n{tasks}\nNotas:\n{notes}\n\n{question}"
+        "Contexto real de la cuenta:\n{summary}\nTareas ya visibles:\n{tasks}\nNotas:\n{notes}\nCorreo reciente:\n{mail}\n\n{question}"
     );
     (system, prompt)
 }
@@ -201,18 +259,30 @@ mod tests {
             completed_at: None,
         }];
         let prefs = Preferences::default();
+        let mail = vec![MailHint {
+            id: "msg-1".into(),
+            from_name: "Contabilidad".into(),
+            subject: "Factura de marzo".into(),
+            snippet: "Queda pendiente el comprobante.".into(),
+        }];
         let ctx = DayContext {
             now,
             events: &events,
             tasks: &tasks,
             notes: &[],
+            mail: &mail,
             connected: true,
         };
         let text = local_summary(&ctx, &prefs);
         assert!(text.contains("Revisión de contratos"));
+        assert!(text.contains("Factura de marzo"));
         assert!(!text.contains("28 de octubre"));
-        assert!(!text.contains("Place2Pay"));
         let ideas = suggestions(&ctx, &prefs);
-        assert!(ideas.iter().any(|item| item.target_id == "t"));
+        assert!(ideas.iter().any(|item| item.when_label == "Factura de marzo"));
+        assert!(ideas.iter().all(|item| !item.title.contains("Enviar minuta")));
+        let (summary, parsed) = split_briefing("La jornada deja un hueco después de la revisión.\nSUGERENCIA|Pedir el comprobante|Factura de marzo|Abrir");
+        assert!(summary.contains("hueco"));
+        assert_eq!(parsed.len(), 1);
+        assert!(keep_novel(parsed, &events, &tasks).len() == 1);
     }
 }

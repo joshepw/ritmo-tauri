@@ -34,6 +34,7 @@
       accountName: snap.accountName,
       accountEmail: snap.accountEmail,
       accountInitials: snap.accountInitials,
+      accountAvatar: snap.accountAvatar || '',
       accountStatus: snap.accountStatus,
       accountStatusColor: snap.accountStatusColor,
       weekdayLabel: snap.weekdayLabel,
@@ -80,7 +81,7 @@
       tasksLoading: !!snap.tasksLoading,
       clickupLoading: !!snap.clickupLoading,
     };
-    if (first || (snap.preferences && snap.preferences.chatUi === 'Enlace')) {
+    if (first || (snap.preferences && snap.preferences.chatUi === 'Navegador')) {
       patch.chatOpen = false;
     }
     if (first) patch.isApp = true;
@@ -300,7 +301,22 @@
       component.setState({ aiLoading: true });
       try {
         const result = await invoke('assistant_summary', { manual: true });
-        component.setState({ aiSummary: result.text, aiLoading: false });
+        if (!result.running) {
+          component.setState({ aiSummary: result.text, aiLoading: false });
+          return;
+        }
+        if (result.text) component.setState({ aiSummary: result.text });
+        const events = window.__TAURI__ && window.__TAURI__.event;
+        if (!events) {
+          component.setState({ aiLoading: false });
+          return;
+        }
+        const unlisten = await events.listen('ritmo-briefing', (event) => {
+          const payload = event.payload || {};
+          if (payload.running) return;
+          unlisten();
+          component.setState({ aiSummary: payload.text || '', aiLoading: false });
+        });
       } catch (error) {
         component.setState({ aiLoading: false });
         toast(component, error);
@@ -326,11 +342,15 @@
       }
     },
     async setGeminiKey(component) {
-      const key = window.prompt('Clave de API de Gemini');
-      if (!key) return;
+      const key = (component.state.geminiDraft || '').trim();
+      if (!key) {
+        toast(component, 'Pega la clave de Gemini en el campo.');
+        return;
+      }
       try {
         applySnapshot(component, await invoke('set_gemini_key', { key }));
-        toast(component, 'Clave guardada en el llavero.');
+        component.setState({ geminiDraft: '' });
+        toast(component, 'Clave de Gemini guardada.');
       } catch (error) {
         toast(component, error);
       }
@@ -403,6 +423,14 @@
         toast(component, error);
       }
     },
+    async openKeysGuide(component, anchor) {
+      const url = 'https://github.com/joshepw/ritmo-tauri/blob/main/docs/claves.md' + (anchor ? '#' + anchor : '');
+      try {
+        await invoke('open_meeting', { url });
+      } catch (error) {
+        toast(component, error);
+      }
+    },
   };
 
   window.Ritmo = Ritmo;
@@ -412,7 +440,7 @@
       state = {
         prefsOpen: false, prefsTab: 'cuenta', connected: false, isApp: false,
         accountName: 'Sin cuenta conectada', accountEmail: 'Conecta tu cuenta de Google',
-        accountInitials: 'G', accountStatus: 'Desconectado', accountStatusColor: 'rgba(235,235,245,.5)',
+        accountInitials: 'G', accountAvatar: '', accountStatus: 'Desconectado', accountStatusColor: 'rgba(235,235,245,.5)',
         weekdayLabel: '', dateLong: '', menuClock: '', nowMark: '', barMeetingLabel: '',
         showBarTimer: true, showBarMeeting: false,
         p: { login: true, barTimer: true, barMeeting: true, barMeetMin: '1 h', range: '7 días', linkRows: [
@@ -429,7 +457,7 @@
           { key: 'openDiscord', label: 'Abrir Discord', value: 'nativeApp' },
           { key: 'openFacetime', label: 'Abrir FaceTime', value: 'nativeApp' },
           { key: 'openOther', label: 'Otros enlaces', value: 'defaultBrowser' },
-        ], detectNotes: true, detectDesc: true, notify: '5 min', autoJoin: false, hideDeclined: true, focusMin: 25, breakMin: 5, longBreak: 15, autoBreak: true, pauseMeet: true, autoSound: true, volume: 40, track: 'brown', breathTech: 'coherente', breathSound: true, breathCycles: 6, aiDaily: true, aiTime: 'Al abrir', aiSuggest: true, aiNotes: true, svcCal: true, svcTasks: false, svcGemini: false, svcFactorial: false, svcClickup: false, chatUi: 'iframe', shortcut: '⌥ ⌘ Espacio' },
+        ], detectNotes: true, detectDesc: true, notify: '5 min', autoJoin: false, hideDeclined: true, focusMin: 25, breakMin: 5, longBreak: 15, autoBreak: true, pauseMeet: true, autoSound: true, volume: 40, track: 'brown', breathTech: 'coherente', breathSound: true, breathCycles: 6, aiDaily: true, aiTime: 'Al abrir', aiSuggest: true, aiNotes: true, readMail: false, svcCal: true, svcTasks: false, svcGemini: false, svcFactorial: false, svcClickup: false, chatUi: 'Ventana', shortcut: '⌥ ⌘ Espacio' },
         agendaToday: [], agendaDays: [], taskItems: [], clickupItems: [], clickupGroups: [], noteItems: [], calendars: [], suggestions: [],
         nextTitle: 'Conecta tu cuenta', nextMeta: 'Google Calendar', nextColor: 'rgba(255,255,255,.18)', nextAbbr: '·', nextJoinUrl: '',
         mode: 'focus', running: false, remainingSecs: 25 * 60, durationSecs: 25 * 60, session: 1,
@@ -439,7 +467,7 @@
         aiOpen: false, aiSummary: '', aiLoading: false, aiAsking: false, aiDraft: '', aiChat: [],
         chatOpen: false,
         booting: false, signingIn: false,
-        draft: '', factorialDraft: '', clickupDraft: '', taskAdding: false, taskHistory: false, freshTaskId: null, taskPulse: null, geminiKeySet: false, factorialKeySet: false, clickupKeySet: false, geminiKeyMask: '', factorialKeyMask: '', clickupKeyMask: '', clickupLoading: false, oauthConfigured: false,
+        draft: '', factorialDraft: '', clickupDraft: '', geminiDraft: '', taskAdding: false, taskHistory: false, freshTaskId: null, taskPulse: null, geminiKeySet: false, factorialKeySet: false, clickupKeySet: false, geminiKeyMask: '', factorialKeyMask: '', clickupKeyMask: '', clickupLoading: false, oauthConfigured: false,
         shortcutRecording: false,
         appVersion: '0.1.0', updateAvailable: false, updateVersion: '', updateNotes: '',
         updateChecking: false, updateInstalling: false,
@@ -463,7 +491,7 @@
       }
       syncChatSurface() {
         if (settingsSurface()) return;
-        const want = !!(this.state.chatOpen && this.state.p && this.state.p.chatUi === 'iframe' && window.__TAURI__);
+        const want = !!(this.state.chatOpen && this.state.p && this.state.p.chatUi === 'Ventana' && window.__TAURI__);
         if (want === this._chatSurface) return;
         this._chatSurface = want;
         invoke(want ? 'show_chat_window' : 'hide_chat_window').catch((error) => toast(this, error));
@@ -748,7 +776,33 @@
             ] },
           ],
           cuenta: [
+            { title: 'Servicios conectados', note: 'Los permisos se piden con tu cuenta de Google. Tasks abre de nuevo el consentimiento la primera vez.', rows: [
+              toggle('svcCal', 'Google Calendar', 'Reuniones y enlaces', off),
+              toggle('svcTasks', 'Google Tasks', 'Listas y tareas', off),
+              toggle('svcGemini', 'Gemini', state.geminiKeySet ? 'Clave guardada en el llavero' : 'Falta la clave de API', off),
+              toggle('svcFactorial', 'Factorial', state.factorialKeySet ? 'Cumpleaños, ausencias y fichaje' : 'Falta la clave de API'),
+              toggle('svcClickup', 'ClickUp', state.clickupKeySet ? 'Tareas asignadas y tiempo de enfoque' : 'Falta la clave de API'),
+            ] },
+            { title: 'Chat', note: 'Ventana abre Google Chat en Ritmo. Navegador lo abre en el navegador.', rows: [
+              choice('chatUi', 'Cómo se abre', ['Ventana', 'Navegador']),
+            ] },
+            { title: 'Otras cuentas', rows: [{ isButton: true, label: 'Agregar otra cuenta de Google', sub: 'Por ahora Ritmo usa una sola cuenta', value: 'Agregar…', btnColor: '#f5f5f7', action: () => toast(this, 'Por ahora Ritmo usa una sola cuenta de Google.') }] },
+          ],
+          claves: [
+            { title: 'Gemini', note: 'La clave se queda en el llavero de este equipo.', rows: [
+              { isButton: true, label: 'Cómo obtenerla', sub: 'Se crea en Google AI Studio', value: 'Abrir', btnColor: '#0a84ff', action: () => Ritmo.openKeysGuide(this, 'gemini') },
+              secretField({
+                stored: state.geminiKeySet,
+                mask: state.geminiKeyMask,
+                draft: state.geminiDraft,
+                placeholder: 'Clave de Gemini',
+                draftKey: 'geminiDraft',
+                save: () => Ritmo.setGeminiKey(this),
+              }),
+              ...(state.geminiKeySet ? [{ isButton: true, label: 'Quitar clave', sub: '', value: 'Quitar', btnColor: '#ff6961', action: () => Ritmo.clearGeminiKey(this) }] : []),
+            ] },
             { title: 'Factorial', note: 'La clave es de la empresa. Ritmo busca tu ficha con el correo de Google.', rows: [
+              { isButton: true, label: 'Cómo obtenerla', sub: 'La crea un administrador en Factorial', value: 'Abrir', btnColor: '#0a84ff', action: () => Ritmo.openKeysGuide(this, 'factorial') },
               secretField({
                 stored: state.factorialKeySet,
                 mask: state.factorialKeyMask,
@@ -760,6 +814,7 @@
               ...(state.factorialKeySet ? [{ isButton: true, label: 'Quitar clave', sub: '', value: 'Quitar', btnColor: '#ff6961', action: () => Ritmo.clearFactorialKey(this) }] : []),
             ] },
             { title: 'ClickUp', note: 'Si hay varios espacios de trabajo, Ritmo usa el primero.', rows: [
+              { isButton: true, label: 'Cómo obtenerla', sub: 'Es el token personal de tu usuario', value: 'Abrir', btnColor: '#0a84ff', action: () => Ritmo.openKeysGuide(this, 'clickup') },
               secretField({
                 stored: state.clickupKeySet,
                 mask: state.clickupKeyMask,
@@ -770,23 +825,6 @@
               }),
               ...(state.clickupKeySet ? [{ isButton: true, label: 'Quitar clave', sub: '', value: 'Quitar', btnColor: '#ff6961', action: () => Ritmo.clearClickupKey(this) }] : []),
             ] },
-            { title: 'Servicios conectados', note: 'Los permisos se piden con tu cuenta de Google. Tasks abre de nuevo el consentimiento la primera vez.', rows: [
-              toggle('svcCal', 'Google Calendar', 'Reuniones y enlaces', off),
-              toggle('svcTasks', 'Google Tasks', 'Listas y tareas', off),
-              toggle('svcGemini', 'Gemini', state.geminiKeySet ? 'Clave guardada en el llavero' : 'Falta la clave de API', off),
-              toggle('svcFactorial', 'Factorial', state.factorialKeySet ? 'Cumpleaños, ausencias y fichaje' : 'Falta la clave de API'),
-              toggle('svcClickup', 'ClickUp', state.clickupKeySet ? 'Tareas asignadas y tiempo de enfoque' : 'Falta la clave de API'),
-            ] },
-            { title: 'Chat', note: 'iframe abre Google Chat en su ventana. Enlace abre chat.google.com.', rows: [
-              choice('chatUi', 'Cómo se abre', ['iframe', 'Enlace']),
-            ] },
-            { title: 'Clave de Gemini', rows: state.geminiKeySet ? [
-              secretField({ stored: true, mask: state.geminiKeyMask, draft: '', placeholder: '', draftKey: 'geminiDraft', save: () => {} }),
-              { isButton: true, label: 'Quitar clave', sub: '', value: 'Quitar', btnColor: '#ff6961', action: () => Ritmo.clearGeminiKey(this) },
-            ] : [
-              { isButton: true, label: 'Guardar clave de API', sub: 'No se incluye en la app', value: 'Guardar', btnColor: '#f5f5f7', action: () => Ritmo.setGeminiKey(this) },
-            ] },
-            { title: 'Otras cuentas', rows: [{ isButton: true, label: 'Agregar otra cuenta de Google', sub: 'Por ahora Ritmo usa una sola cuenta', value: 'Agregar…', btnColor: '#f5f5f7', action: () => toast(this, 'Por ahora Ritmo usa una sola cuenta de Google.') }] },
           ],
           calendario: [
             { title: 'Calendarios visibles', rows: (state.calendars || []).length ? state.calendars.map((calendar) => ({
@@ -813,8 +851,8 @@
             ] },
           ],
           gemini: [
-            { title: 'Asistente', rows: [toggle('aiDaily', 'Resumen del día al abrir', '', off || !prefs.svcGemini), choice('aiTime', 'Preparar resumen', ['8:00', '9:00', 'Al abrir']), toggle('aiSuggest', 'Sugerir pomodoros en huecos libres')] },
-            { title: 'Privacidad', note: 'La clave de Gemini se queda en el llavero de este equipo. El resumen sin clave usa tu agenda y tus tareas, sin inventar reuniones.', rows: [toggle('aiNotes', 'Permitir leer notas locales'), { label: 'Correo', sub: 'Ritmo no tiene un buzón conectado.' }] },
+            { title: 'Asistente', rows: [toggle('aiDaily', 'Resumen del día al abrir', '', off || !prefs.svcGemini), choice('aiTime', 'Preparar resumen', ['8:00', '9:00', 'Al abrir']), toggle('aiSuggest', 'Sugerir lo que no está en la agenda')] },
+            { title: 'Privacidad', note: 'El resumen sin clave usa tu agenda, tus tareas y, si lo permites, el asunto del correo. No se muestra la bandeja.', rows: [toggle('aiNotes', 'Permitir leer notas locales'), toggle('readMail', 'Revisar el correo', 'Solo para el resumen y las sugerencias. Pide permiso la primera vez.', off)] },
           ],
         };
         return (groups[state.prefsTab] || []).map((group) => ({
@@ -931,17 +969,20 @@
             this.setState({ prefsOpen: false });
             if (window.__TAURI__) invoke('hide_settings_window').catch(() => {});
           },
-          prefTabs: [['general', 'General', '⚙︎', '#8e8e93'], ['cuenta', 'Cuenta', 'G', '#0a84ff'], ['calendario', 'Calendario', '▦', '#ff453a'], ['pomodoro', 'Pomodoro', '◎', '#ff9f0a'], ['gemini', 'Gemini', '✦', '#bf5af2']].map(([key, label, icon, color]) => ({
+          prefTabs: [['general', 'General', '⚙︎', '#8e8e93'], ['cuenta', 'Cuenta', 'G', '#0a84ff'], ['claves', 'Claves', '∗', '#64d2ff'], ['calendario', 'Calendario', '▦', '#ff453a'], ['pomodoro', 'Pomodoro', '◎', '#ff9f0a'], ['gemini', 'Gemini', '✦', '#bf5af2']].map(([key, label, icon, color]) => ({
             label, icon, iconBg: color,
             bg: state.prefsTab === key ? '#151515' : 'transparent',
             fg: state.prefsTab === key ? '#f5f5f7' : 'rgba(235,235,245,.6)',
             select: () => this.setState({ prefsTab: key }),
           })),
-          prefsTitle: { general: 'General', cuenta: 'Cuenta', calendario: 'Calendario', pomodoro: 'Pomodoro', gemini: 'Gemini' }[state.prefsTab],
+          prefsTitle: { general: 'General', cuenta: 'Cuenta', claves: 'Claves', calendario: 'Calendario', pomodoro: 'Pomodoro', gemini: 'Gemini' }[state.prefsTab],
           isAccountTab: state.prefsTab === 'cuenta',
           accountName: state.accountName,
           accountEmail: state.accountEmail,
           accountInitials: state.accountInitials,
+          accountAvatar: state.accountAvatar || '',
+          hasAvatar: !!state.accountAvatar,
+          noAvatar: !state.accountAvatar,
           accountStatus: state.accountStatus,
           accountStatusColor: state.accountStatusColor,
           signingIn: !!state.signingIn,
@@ -985,8 +1026,8 @@
           },
           chatOpen: state.chatOpen,
           toggleChat: () => {
-            const mode = (state.p && state.p.chatUi) || 'iframe';
-            if (mode === 'Enlace') {
+            const mode = (state.p && state.p.chatUi) || 'Ventana';
+            if (mode === 'Navegador') {
               this.setState({ chatOpen: false });
               Ritmo.launchChat(this);
               return;
@@ -994,7 +1035,7 @@
             const next = !state.chatOpen;
             this.setState({ chatOpen: next });
           },
-          chatBtnTitle: (state.p && state.p.chatUi) === 'Enlace' ? 'Abrir Google Chat' : 'Google Chat',
+          chatBtnTitle: (state.p && state.p.chatUi) === 'Navegador' ? 'Abrir Google Chat' : 'Google Chat',
           chatBtnBg: state.chatOpen ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.08)',
           aiBtnBg: state.aiOpen ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.08)',
           aiLoading: !!state.aiLoading,
