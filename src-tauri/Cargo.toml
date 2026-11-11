@@ -1,6 +1,6 @@
 [package]
 name = "ritmo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Ritmo: tu día, tus reuniones y tu enfoque en la barra de menú"
 edition = "2021"
 
