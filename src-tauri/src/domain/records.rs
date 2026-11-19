@@ -45,6 +45,14 @@ pub struct TaskItem {
     pub due: Option<NaiveDate>,
     pub done: bool,
     pub list_id: String,
+    #[serde(default)]
+    pub clickup_list: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub status_color: String,
+    #[serde(default)]
+    pub priority: String,
     #[serde(default = "unknown_task_time")]
     pub updated_at: DateTime<Local>,
     #[serde(default)]
@@ -711,6 +719,10 @@ mod tests {
             due,
             done,
             list_id: "@default".into(),
+            clickup_list: String::new(),
+            status: String::new(),
+            status_color: String::new(),
+            priority: String::new(),
             updated_at: at(secs),
             completed_at: None,
         };
@@ -733,6 +745,10 @@ mod tests {
             due: None,
             done: true,
             list_id: "@default".into(),
+            clickup_list: String::new(),
+            status: String::new(),
+            status_color: String::new(),
+            priority: String::new(),
             updated_at: DateTime::UNIX_EPOCH.with_timezone(&Local),
             completed_at: Some(
                 today

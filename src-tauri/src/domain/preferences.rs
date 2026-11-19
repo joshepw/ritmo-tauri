@@ -61,6 +61,12 @@ pub struct Preferences {
     pub chat_ui: String,
     #[serde(default = "default_panel_shortcut")]
     pub panel_shortcut: String,
+    #[serde(default)]
+    pub bubble_avatar: bool,
+    #[serde(default)]
+    pub bubble_x: Option<f64>,
+    #[serde(default)]
+    pub bubble_y: Option<f64>,
 }
 
 impl Default for Preferences {
@@ -103,6 +109,9 @@ impl Default for Preferences {
             service_clickup: false,
             chat_ui: default_chat_ui(),
             panel_shortcut: default_panel_shortcut(),
+            bubble_avatar: false,
+            bubble_x: None,
+            bubble_y: None,
         }
     }
 }
@@ -116,6 +125,9 @@ fn default_panel_shortcut() -> String {
 }
 
 pub fn normalize_shortcut(raw: &str) -> Result<String, AppError> {
+    if raw.trim().is_empty() {
+        return Ok(String::new());
+    }
     let mut shift = false;
     let mut control = false;
     let mut alt = false;
@@ -182,6 +194,9 @@ fn canonical_shortcut_key(token: &str) -> Result<String, AppError> {
 }
 
 pub fn shortcut_label(spec: &str) -> String {
+    if spec.trim().is_empty() {
+        return String::new();
+    }
     let mut marks = Vec::new();
     let mut key = String::new();
     for token in spec.split('+').map(str::trim).filter(|token| !token.is_empty()) {
@@ -221,6 +236,7 @@ pub enum PrefEffect {
     NeedsScope(String),
     PomodoroTiming,
     Shortcut,
+    Bubble(bool),
 }
 
 pub fn calendar_visible(google_selected: bool, id: &str, prefs: &Preferences) -> bool {
@@ -337,6 +353,13 @@ pub fn apply_pref_patch(
                 }
             }
             "svcGemini" => prefs.service_gemini = expect_bool(value)?,
+            "bubbleAvatar" => {
+                let enabled = expect_bool(value)?;
+                if enabled != prefs.bubble_avatar {
+                    prefs.bubble_avatar = enabled;
+                    effects.push(PrefEffect::Bubble(enabled));
+                }
+            }
             "svcFactorial" => prefs.service_factorial = expect_bool(value)?,
             "svcClickup" => prefs.service_clickup = expect_bool(value)?,
             other => {
@@ -734,5 +757,26 @@ mod tests {
         let effects = apply_pref_patch(&mut prefs, json!({ "shortcut": "super+shift+K" }).as_object().unwrap()).unwrap();
         assert_eq!(prefs.panel_shortcut, "shift+super+K");
         assert!(effects.contains(&PrefEffect::Shortcut));
+        let effects = apply_pref_patch(&mut prefs, json!({ "shortcut": "" }).as_object().unwrap()).unwrap();
+        assert_eq!(prefs.panel_shortcut, "");
+        assert_eq!(shortcut_label(""), "");
+        assert!(effects.contains(&PrefEffect::Shortcut));
+    }
+
+    #[test]
+    fn the_floating_avatar_starts_hidden_and_can_be_turned_on() {
+        let prefs = Preferences::default();
+        assert!(!prefs.bubble_avatar);
+        assert_eq!(prefs.bubble_x, None);
+        let mut stored = serde_json::to_value(prefs).unwrap();
+        stored.as_object_mut().unwrap().remove("bubbleAvatar");
+        let loaded: Preferences = serde_json::from_value(stored).unwrap();
+        assert!(!loaded.bubble_avatar);
+        let mut prefs = loaded;
+        let effects = apply_pref_patch(&mut prefs, json!({ "bubbleAvatar": true }).as_object().unwrap()).unwrap();
+        assert!(prefs.bubble_avatar);
+        assert_eq!(effects, vec![PrefEffect::Bubble(true)]);
+        let again = apply_pref_patch(&mut prefs, json!({ "bubbleAvatar": true }).as_object().unwrap()).unwrap();
+        assert!(again.is_empty());
     }
 }

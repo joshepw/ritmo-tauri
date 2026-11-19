@@ -8,7 +8,8 @@ pub mod records;
 pub mod timefmt;
 
 pub use briefing::{
-    assistant_prompt, keep_novel, local_summary, should_prepare_summary, split_briefing, suggestions, DayContext,
+    assistant_prompt, keep_novel, local_summary, should_prepare_summary, split_briefing, suggestions, tighten_summary,
+    DayContext,
     MailHint, Suggestion,
 };
 pub use error::AppError;

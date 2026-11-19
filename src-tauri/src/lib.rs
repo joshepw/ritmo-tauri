@@ -4,6 +4,9 @@ mod domain;
 mod infrastructure;
 mod shell;
 
+#[cfg(target_os = "macos")]
+mod bubble_panel;
+
 use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +28,9 @@ pub fn run() {
                 shell::open_welcome(app.handle())?;
             }
             state.spawn();
+            if let Some((x, y)) = state.bubble_on_launch() {
+                let _ = shell::show_bubble(app.handle(), x, y);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,6 +41,8 @@ pub fn run() {
             commands::set_calendar_visible,
             commands::add_task,
             commands::toggle_task,
+            commands::clickup_statuses,
+            commands::set_clickup_status,
             commands::add_note,
             commands::pomodoro_action,
             commands::open_meeting,
@@ -50,6 +58,11 @@ pub fn run() {
             commands::hide_chat_window,
             commands::show_gemini_window,
             commands::hide_gemini_window,
+            commands::bubble_origin,
+            commands::place_bubble,
+            commands::toggle_bubble_chat,
+            commands::bubble_chat_open,
+            commands::save_bubble_spot,
             commands::show_settings_window,
             commands::hide_settings_window,
             commands::preview_notification,
@@ -69,6 +82,19 @@ pub fn run() {
                 return;
             }
             let label = window.label();
+            if label == "bubble" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                }
+                return;
+            }
+            if label == "gemini" && shell::gemini_bubble_open() {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    shell::close_owned(window.app_handle(), label);
+                }
+                return;
+            }
             if label != "panel" && label != "chat" && label != "gemini" && label != "settings" {
                 return;
             }

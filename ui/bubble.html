@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gemini</title>
+<style>
+html, body { margin: 0; width: 72px; height: 72px; background: transparent; overflow: hidden; }
+#head {
+  width: 56px; height: 56px; margin: 8px;
+  border: 0; padding: 0; border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 8px 18px rgba(0,0,0,.42), 0 0 0 2px rgba(255,255,255,.9);
+  display: flex; align-items: center; justify-content: center;
+  cursor: grab; -webkit-user-select: none; user-select: none;
+  overflow: hidden;
+}
+#head img { width: 56px; height: 56px; object-fit: cover; pointer-events: none; }
+#head.open { box-shadow: 0 10px 22px rgba(0,0,0,.45), 0 0 0 3px #7aa2ff; }
+#head:active { cursor: grabbing; }
+</style>
+</head>
+<body>
+<button id="head" type="button" title="Gemini" aria-label="Abrir Gemini">
+  <img src="assets/ritmo.png" alt="Ritmo">
+</button>
+<script>
+const tauri = window.__TAURI__;
+const invoke = (command, args) => tauri.core.invoke(command, args || {});
+const head = document.getElementById('head');
+let drag = null;
+
+function setOpen(open) {
+  head.classList.toggle('open', !!open);
+}
+
+head.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  head.setPointerCapture(event.pointerId);
+  const start = { px: event.screenX, py: event.screenY, x: 0, y: 0, moved: false, ready: false };
+  drag = start;
+  invoke('bubble_origin').then((origin) => {
+    if (drag !== start || !origin) return;
+    start.x = origin[0];
+    start.y = origin[1];
+    start.ready = true;
+  });
+});
+
+head.addEventListener('pointermove', (event) => {
+  if (!drag || !drag.ready) return;
+  const dx = event.screenX - drag.px;
+  const dy = event.screenY - drag.py;
+  if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+  drag.moved = true;
+  invoke('place_bubble', { x: drag.x + dx, y: drag.y + dy });
+});
+
+function endDrag() {
+  if (!drag) return;
+  const moved = drag.moved;
+  drag = null;
+  if (moved) invoke('save_bubble_spot');
+  else invoke('toggle_bubble_chat');
+}
+
+head.addEventListener('pointerup', endDrag);
+head.addEventListener('pointercancel', () => { drag = null; });
+
+tauri.event.listen('ritmo-bubble', (event) => setOpen(event.payload === 'open'));
+invoke('bubble_chat_open').then(setOpen).catch(() => {});
+</script>
+</body>
+</html>

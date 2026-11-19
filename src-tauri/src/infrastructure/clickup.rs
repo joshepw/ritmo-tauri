@@ -14,6 +14,20 @@ pub struct Workspace {
     pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListStatus {
+    pub name: String,
+    pub color: String,
+    pub closes: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusChange {
+    pub name: String,
+    pub color: String,
+    pub closes: bool,
+}
+
 pub fn is_clickup_task(id: &str) -> bool {
     id.starts_with(TASK_PREFIX)
 }
@@ -70,6 +84,67 @@ pub async fn assigned_tasks(
         }
     }
     Ok(tasks)
+}
+
+pub async fn list_id(http: &reqwest::Client, token: &str, task_id: &str) -> Result<String, AppError> {
+    let raw = raw_task_id(task_id).ok_or_else(|| AppError::message("No encontré esa tarea."))?;
+    let task = get_json(http, token, &format!("/task/{raw}"), &[]).await?;
+    task.get("list")
+        .and_then(|list| list.get("id"))
+        .and_then(json_id)
+        .ok_or_else(|| AppError::message("ClickUp no dijo en qué lista está la tarea."))
+}
+
+pub async fn statuses(http: &reqwest::Client, token: &str, list_id: &str) -> Result<Vec<ListStatus>, AppError> {
+    let list = get_json(http, token, &format!("/list/{list_id}"), &[]).await?;
+    let statuses = list_statuses(&list);
+    if statuses.is_empty() {
+        return Err(AppError::message("Esa lista de ClickUp no tiene estados."));
+    }
+    Ok(statuses)
+}
+
+pub async fn set_status(
+    http: &reqwest::Client,
+    token: &str,
+    task_id: &str,
+    status: &str,
+) -> Result<StatusChange, AppError> {
+    let status = status.trim();
+    if status.is_empty() {
+        return Err(AppError::message("Elige un estado."));
+    }
+    let raw = raw_task_id(task_id).ok_or_else(|| AppError::message("No encontré esa tarea."))?;
+    let response = http
+        .put(format!("https://api.clickup.com/api/v2/task/{raw}"))
+        .header("Authorization", token)
+        .header("accept", "application/json")
+        .timeout(StdDuration::from_secs(20))
+        .json(&serde_json::json!({ "status": status }))
+        .send()
+        .await
+        .map_err(|_| AppError::message("No se pudo contactar con ClickUp."))?;
+    let body = read_json(response).await?;
+    let applied = body
+        .get("status")
+        .and_then(|item| item.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or(status)
+        .trim()
+        .to_string();
+    let kind = body.get("status").and_then(|item| item.get("type")).and_then(Value::as_str);
+    let color = body
+        .get("status")
+        .and_then(|item| item.get("color"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Ok(StatusChange {
+        name: if applied.is_empty() { status.to_string() } else { applied },
+        color,
+        closes: kind == Some("closed"),
+    })
 }
 
 pub async fn complete_task(http: &reqwest::Client, token: &str, task_id: &str) -> Result<(), AppError> {
@@ -206,6 +281,27 @@ fn task_from(value: &Value, spaces: &HashMap<String, String>) -> Option<TaskItem
         due: due_date(value.get("due_date")),
         done: false,
         list_id: place_name(value, spaces),
+        clickup_list: value.get("list").and_then(|list| list.get("id")).and_then(json_id).unwrap_or_default(),
+        status: value
+            .get("status")
+            .and_then(|item| item.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        status_color: value
+            .get("status")
+            .and_then(|item| item.get("color"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        priority: value
+            .get("priority")
+            .and_then(|item| item.as_str().or_else(|| item.get("priority").and_then(Value::as_str)))
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase(),
         updated_at: clickup_time(value, "date_updated")
             .or_else(|| clickup_time(value, "date_created"))
             .unwrap_or_else(Local::now),
@@ -262,6 +358,33 @@ fn due_date(value: Option<&Value>) -> Option<chrono::NaiveDate> {
     DateTime::from_timestamp_millis(millis).map(|time| time.with_timezone(&Local).date_naive())
 }
 
+pub fn list_statuses(list: &Value) -> Vec<ListStatus> {
+    let mut rows = list
+        .get("statuses")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|status| {
+            let name = status.get("status").and_then(Value::as_str)?.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let order = status.get("orderindex").and_then(Value::as_i64).unwrap_or(i64::MAX);
+            let color = status.get("color").and_then(Value::as_str).unwrap_or("").trim().to_string();
+            Some((
+                order,
+                ListStatus {
+                    name: name.to_string(),
+                    color,
+                    closes: status.get("type").and_then(Value::as_str) == Some("closed"),
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|(order, _)| *order);
+    rows.into_iter().map(|(_, status)| status).collect()
+}
+
 fn closed_status_name(list: &Value) -> Option<String> {
     let statuses = list.get("statuses").and_then(Value::as_array)?;
     status_named(statuses, "closed").or_else(|| status_named(statuses, "done"))
@@ -292,16 +415,20 @@ mod tests {
     #[test]
     fn assigned_tasks_show_the_folder_instead_of_the_list() {
         let tasks = parse_tasks(
-            r#"{"tasks":[
-                {"id":"abc","name":"Informe","due_date":"1762340400000","status":{"type":"open"},"list":{"name":"Backlog"},"folder":{"name":"Sitio web","hidden":false}},
+            r##"{"tasks":[
+                {"id":"abc","name":"Informe","due_date":"1762340400000","status":{"status":"en curso","type":"custom","color":"#4194f6"},"priority":{"priority":"high","color":"#f8ae00"},"list":{"id":"44","name":"Backlog"},"folder":{"name":"Sitio web","hidden":false}},
                 {"id":"done","name":"Cerrada","status":{"type":"closed"},"list":{"name":"Backlog"},"folder":{"name":"Sitio web"}}
-            ]}"#,
+            ]}"##,
         )
         .unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, "clickup:abc");
         assert_eq!(tasks[0].title, "Informe");
         assert_eq!(tasks[0].list_id, "Sitio web");
+        assert_eq!(tasks[0].clickup_list, "44");
+        assert_eq!(tasks[0].status, "en curso");
+        assert_eq!(tasks[0].status_color, "#4194f6");
+        assert_eq!(tasks[0].priority, "high");
         assert!(tasks[0].due.is_some());
         assert!(is_clickup_task(&tasks[0].id));
         assert_eq!(raw_task_id("task-1"), None);
@@ -335,5 +462,24 @@ mod tests {
             "statuses": [{ "status": "listo", "type": "done" }]
         });
         assert_eq!(closed_status_name(&only_done).as_deref(), Some("listo"));
+    }
+
+    #[test]
+    fn a_list_exposes_every_status_in_order() {
+        let list = serde_json::json!({
+            "statuses": [
+                { "status": "cerrada", "type": "closed", "orderindex": 2, "color": "#6bc950" },
+                { "status": "por hacer", "type": "open", "orderindex": 0, "color": "#d3d3d3" },
+                { "status": "en curso", "type": "custom", "orderindex": 1, "color": "#4194f6" }
+            ]
+        });
+        let statuses = list_statuses(&list);
+        assert_eq!(
+            statuses.iter().map(|status| status.name.as_str()).collect::<Vec<_>>(),
+            ["por hacer", "en curso", "cerrada"]
+        );
+        assert!(statuses[2].closes);
+        assert!(!statuses[1].closes);
+        assert_eq!(statuses[1].color, "#4194f6");
     }
 }

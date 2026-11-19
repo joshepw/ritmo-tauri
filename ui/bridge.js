@@ -51,6 +51,7 @@
       nextColor: snap.nextColor,
       nextAbbr: snap.nextAbbr,
       nextJoinUrl: snap.nextJoinUrl,
+      showNext: snap.showNext !== false,
       taskItems: snap.tasks || [],
       clickupItems: snap.clickupTasks || [],
       clickupGroups: snap.clickupGroups || [],
@@ -110,6 +111,7 @@
       nextColor: tick.nextColor,
       nextAbbr: tick.nextAbbr,
       nextJoinUrl: tick.nextJoinUrl,
+      showNext: tick.showNext !== false,
     };
     if (Array.isArray(tick.today)) {
       const stamp = JSON.stringify([tick.today, tick.days || []]);
@@ -238,6 +240,54 @@
       } catch (error) {
         component.setState({ taskAdding: false });
         toast(component, error);
+      }
+    },
+    async openClickupStatuses(component, taskId) {
+      const open = component.state.statusMenu;
+      if (open && open.taskId === taskId) {
+        component.setState({ statusMenu: null });
+        return;
+      }
+      component.setState({ statusMenu: { taskId, loading: true, items: [] } });
+      try {
+        const result = await invoke('clickup_statuses', { taskId });
+        if (!component.state.statusMenu || component.state.statusMenu.taskId !== taskId) return;
+        component.setState({ statusMenu: { taskId, loading: false, items: result.statuses || [] } });
+      } catch (error) {
+        if (component.state.statusMenu && component.state.statusMenu.taskId === taskId) {
+          component.setState({ statusMenu: null });
+        }
+        toast(component, error);
+      }
+    },
+    async chooseClickupStatus(component, taskId, status, closes) {
+      const pulse = component.state.taskPulse;
+      if (pulse && pulse.id === taskId && pulse.phase === 'loading') return;
+      component.setState({ statusMenu: null, taskPulse: { id: taskId, phase: 'loading' } });
+      try {
+        const snap = await invoke('set_clickup_status', { taskId, status });
+        if (!closes) {
+          applySnapshot(component, snap);
+          component.setState({ taskPulse: null });
+          return;
+        }
+        component.setState({ taskPulse: { id: taskId, phase: 'done' } });
+        clearTimeout(component._taskPulse);
+        component._taskPulse = setTimeout(() => {
+          applySnapshot(component, snap);
+          if (component.state.taskPulse && component.state.taskPulse.id === taskId) {
+            component.setState({ taskPulse: null });
+          }
+        }, 360);
+      } catch (error) {
+        component.setState({ taskPulse: { id: taskId, phase: 'error' } });
+        toast(component, error);
+        clearTimeout(component._taskPulse);
+        component._taskPulse = setTimeout(() => {
+          if (component.state.taskPulse && component.state.taskPulse.id === taskId) {
+            component.setState({ taskPulse: null });
+          }
+        }, 460);
       }
     },
     async toggleTask(component, taskId) {
@@ -457,9 +507,9 @@
           { key: 'openDiscord', label: 'Abrir Discord', value: 'nativeApp' },
           { key: 'openFacetime', label: 'Abrir FaceTime', value: 'nativeApp' },
           { key: 'openOther', label: 'Otros enlaces', value: 'defaultBrowser' },
-        ], detectNotes: true, detectDesc: true, notify: '5 min', autoJoin: false, hideDeclined: true, focusMin: 25, breakMin: 5, longBreak: 15, autoBreak: true, pauseMeet: true, autoSound: true, volume: 40, track: 'brown', breathTech: 'coherente', breathSound: true, breathCycles: 6, aiDaily: true, aiTime: 'Al abrir', aiSuggest: true, aiNotes: true, readMail: false, svcCal: true, svcTasks: false, svcGemini: false, svcFactorial: false, svcClickup: false, chatUi: 'Ventana', shortcut: '⌥ ⌘ Espacio' },
+        ], detectNotes: true, detectDesc: true, notify: '5 min', autoJoin: false, hideDeclined: true, focusMin: 25, breakMin: 5, longBreak: 15, autoBreak: true, pauseMeet: true, autoSound: true, volume: 40, track: 'brown', breathTech: 'coherente', breathSound: true, breathCycles: 6, aiDaily: true, aiTime: 'Al abrir', aiSuggest: true, aiNotes: true, readMail: false, svcCal: true, svcTasks: false, svcGemini: false, svcFactorial: false, svcClickup: false, chatUi: 'Ventana', shortcut: '⌥ ⌘ Espacio', bubbleAvatar: false },
         agendaToday: [], agendaDays: [], taskItems: [], clickupItems: [], clickupGroups: [], noteItems: [], calendars: [], suggestions: [],
-        nextTitle: 'Conecta tu cuenta', nextMeta: 'Google Calendar', nextColor: 'rgba(255,255,255,.18)', nextAbbr: '·', nextJoinUrl: '',
+        nextTitle: 'Conecta tu cuenta', nextMeta: 'Google Calendar', nextColor: 'rgba(255,255,255,.18)', nextAbbr: '·', nextJoinUrl: '', showNext: true,
         mode: 'focus', running: false, remainingSecs: 25 * 60, durationSecs: 25 * 60, session: 1,
         focusTaskId: null, completed: {}, volume: 40, track: 'brown', autoSound: true,
         breathTech: 'coherente', breathSound: true, breathCycles: 6, toast: null,
@@ -467,7 +517,7 @@
         aiOpen: false, aiSummary: '', aiLoading: false, aiAsking: false, aiDraft: '', aiChat: [],
         chatOpen: false,
         booting: false, signingIn: false,
-        draft: '', factorialDraft: '', clickupDraft: '', geminiDraft: '', taskAdding: false, taskHistory: false, freshTaskId: null, taskPulse: null, geminiKeySet: false, factorialKeySet: false, clickupKeySet: false, geminiKeyMask: '', factorialKeyMask: '', clickupKeyMask: '', clickupLoading: false, oauthConfigured: false,
+        draft: '', factorialDraft: '', clickupDraft: '', geminiDraft: '', taskAdding: false, taskHistory: false, freshTaskId: null, taskPulse: null, statusMenu: null, geminiKeySet: false, factorialKeySet: false, clickupKeySet: false, geminiKeyMask: '', factorialKeyMask: '', clickupKeyMask: '', clickupLoading: false, oauthConfigured: false,
         shortcutRecording: false,
         appVersion: '0.1.0', updateAvailable: false, updateVersion: '', updateNotes: '',
         updateChecking: false, updateInstalling: false,
@@ -758,7 +808,7 @@
         const groups = {
           general: [
             { title: 'Acerca de', rows: [{ label: 'Ritmo ' + (state.appVersion || '0.1.0'), sub: 'Tu día, tus reuniones y tu enfoque en la barra de menú' }] },
-            { title: 'Inicio', rows: [toggle('login', 'Abrir al iniciar sesión'), { isKey: true, label: 'Atajo para abrir el panel', sub: state.shortcutRecording ? 'Pulsa la combinación. Esc cancela.' : 'Pulsa el atajo para cambiarlo', value: state.shortcutRecording ? '…' : (prefs.shortcut || '⌥ ⌘ Espacio'), action: () => this.captureShortcut() }] },
+            { title: 'Inicio', rows: [toggle('login', 'Abrir al iniciar sesión'), { isKey: true, label: 'Atajo para abrir el panel', sub: state.shortcutRecording ? 'Pulsa la combinación. Esc cancela.' : (prefs.shortcut ? 'Pulsa el atajo para cambiarlo' : 'Sin atajo. El panel se abre desde el icono.'), value: state.shortcutRecording ? '…' : (prefs.shortcut || 'Sin atajo'), canClear: !!prefs.shortcut && !state.shortcutRecording, action: () => this.captureShortcut(), clear: () => Ritmo.patch(this, { shortcut: '' }) }] },
             { title: 'Barra de menú', rows: [toggle('barTimer', 'Mostrar tiempo del pomodoro'), toggle('barMeeting', 'Mostrar cuenta regresiva de la próxima reunión'), choice('barMeetMin', 'Mostrar reuniones desde', ['15 min', '1 h', '12 h', '24 h', 'Hoy', 'Siempre'], 'Hoy muestra solo las que faltan hoy')] },
             { title: 'App', rows: [
               {
@@ -852,6 +902,7 @@
           ],
           gemini: [
             { title: 'Asistente', rows: [toggle('aiDaily', 'Resumen del día al abrir', '', off || !prefs.svcGemini), choice('aiTime', 'Preparar resumen', ['8:00', '9:00', 'Al abrir']), toggle('aiSuggest', 'Sugerir lo que no está en la agenda')] },
+            { title: 'Avatar flotante', note: 'Un círculo sobre las demás apps. Arrástralo y tócalo para abrir a Gemini.', rows: [toggle('bubbleAvatar', 'Mostrar avatar')] },
             { title: 'Privacidad', note: 'El resumen sin clave usa tu agenda, tus tareas y, si lo permites, el asunto del correo. No se muestra la bandeja.', rows: [toggle('aiNotes', 'Permitir leer notas locales'), toggle('readMail', 'Revisar el correo', 'Solo para el resumen y las sugerencias. Pide permiso la primera vez.', off)] },
           ],
         };
@@ -859,7 +910,7 @@
           ...group,
           note: group.note || '',
           rows: group.rows.map((row, index) => ({
-            dot: '', sub: '', opacity: 1, isToggle: false, isStepper: false, isChoice: false, isSelect: false, isKey: false, isButton: false, isSecret: false, stored: false, showInput: false, mask: '', action: () => {},
+            dot: '', sub: '', opacity: 1, isToggle: false, isStepper: false, isChoice: false, isSelect: false, isKey: false, isButton: false, isSecret: false, stored: false, showInput: false, mask: '', canClear: false, action: () => {}, clear: () => {},
             border: index ? '.5px solid rgba(255,255,255,.08)' : 'none',
             direction: row.stack ? 'column' : 'row',
             align: row.stack ? 'stretch' : 'center',
@@ -1085,6 +1136,7 @@
             const body = window.prompt('Texto de la nota', '') || '';
             Ritmo.addNote(this, title, body);
           },
+          showNext: state.showNext !== false,
           nextTitle: state.nextTitle,
           nextMeta: state.nextMeta,
           nextColor: state.nextColor,
@@ -1112,17 +1164,35 @@
           clickupCount: (state.clickupItems || []).length,
           clickupLoading: !!state.clickupLoading,
           clickupEmpty: !!(state.p && state.p.svcClickup) && !state.clickupLoading && !(state.clickupItems || []).length,
+          statusMenuOpen: !!(state.statusMenu && state.statusMenu.taskId),
+          closeStatusMenu: () => this.setState({ statusMenu: null }),
           clickupGroups: (state.clickupGroups || []).map((group) => ({
             label: group.label,
-            tasks: (group.tasks || []).map((task) => ({
-              ...task,
-              ...taskMark(task, '#ff5a36'),
-              hasDue: !!task.due,
-              dueColor: task.late ? '#ff453a' : 'rgba(235,235,245,.5)',
-              focusColor: state.focusTaskId === task.id ? '#ff453a' : 'rgba(235,235,245,.3)',
-              toggle: () => Ritmo.toggleTask(this, task.id),
-              focus: () => Ritmo.pomodoro(this, 'start', task.id),
-            })),
+            tasks: (group.tasks || []).map((task) => {
+              const menu = state.statusMenu && state.statusMenu.taskId === task.id ? state.statusMenu : null;
+              const meta = [task.status, task.due].filter(Boolean).join(' · ');
+              return {
+                ...task,
+                ...taskMark(task, '#ff5a36'),
+                statusColor: task.statusColor || '',
+                hasStatus: !!(task.statusColor && String(task.statusColor).trim()),
+                hasMeta: !!meta,
+                meta,
+                dueColor: task.late ? '#ff453a' : 'rgba(235,235,245,.5)',
+                focusColor: state.focusTaskId === task.id ? '#ff453a' : 'rgba(235,235,245,.3)',
+                layer: menu ? 6 : 'auto',
+                menuOpen: !!menu,
+                menuLoading: !!(menu && menu.loading),
+                statuses: menu ? (menu.items || []).map((item) => ({
+                  name: item.name,
+                  color: item.color || 'rgba(255,255,255,.35)',
+                  check: item.current ? '✓' : '',
+                  select: () => Ritmo.chooseClickupStatus(this, task.id, item.name, !!item.closes),
+                })) : [],
+                toggle: () => Ritmo.openClickupStatuses(this, task.id),
+                focus: () => Ritmo.pomodoro(this, 'start', task.id),
+              };
+            }),
           })),
           tasks: (state.taskItems || []).filter((task) => !task.done || state.taskHistory || task.doneToday || (state.taskPulse && state.taskPulse.id === task.id)).map((task) => ({
             ...task,

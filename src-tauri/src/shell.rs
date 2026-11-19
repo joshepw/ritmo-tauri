@@ -6,7 +6,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Rect, WebviewWindow,
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Rect, WebviewWindow,
 };
 
 // El icono queda al centro de la agenda. La ventana ya no trae margen transparente.
@@ -19,7 +19,13 @@ static PANEL_FOCUSED: AtomicBool = AtomicBool::new(false);
 static PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static CHAT_OPEN: AtomicBool = AtomicBool::new(false);
 static GEMINI_OPEN: AtomicBool = AtomicBool::new(false);
+static GEMINI_BUBBLE: AtomicBool = AtomicBool::new(false);
 static SETTINGS_OPEN: AtomicBool = AtomicBool::new(false);
+static BUBBLE_X: AtomicU64 = AtomicU64::new(0);
+static BUBBLE_Y: AtomicU64 = AtomicU64::new(0);
+const AVATAR_SIZE: f64 = 72.0;
+const BUBBLE_CHAT_W: f64 = 360.0;
+const BUBBLE_CHAT_H: f64 = 560.0;
 static HIDE_TICK: AtomicU64 = AtomicU64::new(0);
 static WELCOME_OPEN: AtomicBool = AtomicBool::new(false);
 
@@ -60,6 +66,9 @@ fn set_menu_bar_policy(app: &AppHandle) {
             let ns_app = NSApplication::sharedApplication(marker);
             let _ = ns_app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
         }
+        // El panel del avatar solo entra en un espacio a pantalla completa
+        // si se crea con la app ya en modo accesorio.
+        crate::bubble_panel::recreate_after_policy();
     });
 }
 
@@ -78,6 +87,8 @@ pub fn enter_menu_bar(app: &AppHandle) {
     {
         let _ = COMPANION_APP.set(app.clone());
         watch_system_theme();
+        watch_bubble_front();
+        lift_bubble(app);
     }
 }
 
@@ -252,11 +263,14 @@ pub fn register_panel_shortcut(app: &AppHandle, spec: &str) -> Result<(), String
     {
         use std::str::FromStr;
         use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+        let shortcuts = app.global_shortcut();
+        let _ = shortcuts.unregister_all();
+        if spec.trim().is_empty() {
+            return Ok(());
+        }
         let shortcut = Shortcut::from_str(spec).map_err(|_| {
             "Esa combinación no se puede usar como atajo.".to_string()
         })?;
-        let shortcuts = app.global_shortcut();
-        let _ = shortcuts.unregister_all();
         shortcuts.register(shortcut).map_err(|_| {
             "Esa combinación ya la usa el sistema u otra app.".to_string()
         })?;
@@ -314,7 +328,9 @@ pub fn hide_panel(app: &AppHandle) {
     PANEL_OPEN.store(false, Ordering::Relaxed);
     HIDE_TICK.fetch_add(1, Ordering::Relaxed);
     hide_owned(app, "chat");
-    hide_owned(app, "gemini");
+    if !GEMINI_BUBBLE.load(Ordering::Relaxed) {
+        hide_owned(app, "gemini");
+    }
     hide_owned(app, "settings");
     let Some(win) = app.get_webview_window("panel") else {
         return;
@@ -409,6 +425,7 @@ pub fn hide_chat_window(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn show_gemini_window(app: &AppHandle) -> Result<(), String> {
+    let was_bubble = GEMINI_BUBBLE.swap(false, Ordering::Relaxed);
     GEMINI_OPEN.store(true, Ordering::Relaxed);
     open_owned(
         app,
@@ -420,7 +437,19 @@ pub fn show_gemini_window(app: &AppHandle) -> Result<(), String> {
         360.0,
         480.0,
         None,
-    )
+    )?;
+    if let Some(win) = app.get_webview_window("gemini") {
+        let _ = win.set_decorations(false);
+        let _ = win.set_resizable(true);
+        if was_bubble {
+            let _ = win.set_size(LogicalSize::new(380.0, 640.0));
+            let (x, y) = companion_origin(app, "gemini", 380.0, 640.0);
+            let _ = win.set_position(LogicalPosition::new(x, y));
+        }
+        style_card(&win);
+    }
+    mark_bubble_chat(app, false);
+    Ok(())
 }
 
 pub fn show_settings_window(app: &AppHandle) -> Result<(), String> {
@@ -435,7 +464,12 @@ pub fn show_settings_window(app: &AppHandle) -> Result<(), String> {
         520.0,
         420.0,
         None,
-    )
+    )?;
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.set_decorations(false);
+        style_card(&win);
+    }
+    Ok(())
 }
 
 pub fn hide_settings_window(app: &AppHandle) -> Result<(), String> {
@@ -446,10 +480,171 @@ pub fn hide_settings_window(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn hide_gemini_window(app: &AppHandle) -> Result<(), String> {
+    GEMINI_BUBBLE.store(false, Ordering::Relaxed);
     GEMINI_OPEN.store(false, Ordering::Relaxed);
     hide_owned(app, "gemini");
     let _ = tell(app, "gemini-closed");
+    mark_bubble_chat(app, false);
     Ok(())
+}
+
+pub fn gemini_bubble_open() -> bool {
+    GEMINI_BUBBLE.load(Ordering::Relaxed)
+}
+
+/// Shows the round avatar that floats above other apps.
+pub fn show_bubble(app: &AppHandle, saved_x: Option<f64>, saved_y: Option<f64>) -> Result<(), String> {
+    let (x, y) = match (saved_x, saved_y) {
+        (Some(x), Some(y)) => clamp_avatar(app, x, y),
+        _ => default_bubble_origin(app),
+    };
+    remember_bubble_point(x, y);
+    hide_owned(app, "bubble");
+    #[cfg(target_os = "macos")]
+    {
+        let _ = COMPANION_APP.set(app.clone());
+        let app = app.clone();
+        let _ = app.clone().run_on_main_thread(move || {
+            crate::bubble_panel::show(x, y);
+            let _ = app;
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, x, y);
+    Ok(())
+}
+
+pub fn hide_bubble(app: &AppHandle) {
+    hide_owned(app, "bubble");
+    #[cfg(target_os = "macos")]
+    crate::bubble_panel::hide();
+    if GEMINI_BUBBLE.load(Ordering::Relaxed) {
+        let _ = hide_gemini_window(app);
+    }
+}
+
+pub fn bubble_origin(app: &AppHandle) -> (f64, f64) {
+    let _ = app;
+    #[cfg(target_os = "macos")]
+    if let Some(origin) = crate::bubble_panel::origin() {
+        return origin;
+    }
+    (
+        f64::from_bits(BUBBLE_X.load(Ordering::Relaxed)),
+        f64::from_bits(BUBBLE_Y.load(Ordering::Relaxed)),
+    )
+}
+
+pub fn shared_app() -> Option<AppHandle> {
+    #[cfg(target_os = "macos")]
+    {
+        return COMPANION_APP.get().cloned();
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+pub fn queue_save_bubble(x: f64, y: f64) {
+    remember_bubble_point(x, y);
+    let Some(app) = shared_app() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        if let Some(state) = app.try_state::<crate::application::AppState>() {
+            let _ = state.inner.remember_bubble_at(x, y).await;
+        }
+    });
+}
+
+pub fn place_bubble(app: &AppHandle, x: f64, y: f64) {
+    let (x, y) = clamp_avatar(app, x, y);
+    remember_bubble_point(x, y);
+    #[cfg(target_os = "macos")]
+    crate::bubble_panel::move_to(x, y);
+    if GEMINI_BUBBLE.load(Ordering::Relaxed) {
+        place_bubble_chat(app, x, y);
+    }
+}
+
+pub fn bubble_chat_open(app: &AppHandle) -> bool {
+    GEMINI_BUBBLE.load(Ordering::Relaxed)
+        && app
+            .get_webview_window("gemini")
+            .and_then(|win| win.is_visible().ok())
+            .unwrap_or(false)
+}
+
+pub fn toggle_bubble_chat(app: &AppHandle) -> Result<(), String> {
+    if bubble_chat_open(app) {
+        return hide_gemini_window(app);
+    }
+    GEMINI_BUBBLE.store(true, Ordering::Relaxed);
+    GEMINI_OPEN.store(true, Ordering::Relaxed);
+    let x = f64::from_bits(BUBBLE_X.load(Ordering::Relaxed));
+    let y = f64::from_bits(BUBBLE_Y.load(Ordering::Relaxed));
+    let (chat_x, chat_y) = bubble_chat_origin(app, x, y);
+    if app.get_webview_window("gemini").is_none() {
+        let win = tauri::WebviewWindowBuilder::new(app, "gemini", tauri::WebviewUrl::App("gemini.html".into()))
+            .title("Gemini")
+            .inner_size(BUBBLE_CHAT_W, BUBBLE_CHAT_H)
+            .min_inner_size(320.0, 420.0)
+            .position(chat_x, chat_y)
+            .resizable(false)
+            .maximizable(false)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .skip_taskbar(true)
+            .focused(true)
+            .visible(true)
+            .build()
+            .map_err(|err| err.to_string())?;
+        let _ = win.set_visible_on_all_workspaces(true);
+    }
+    present_bubble_chat(app, chat_x, chat_y)?;
+    Ok(())
+}
+
+fn present_bubble_chat(app: &AppHandle, x: f64, y: f64) -> Result<(), String> {
+    let Some(win) = app.get_webview_window("gemini") else {
+        return Ok(());
+    };
+    let _ = win.set_decorations(false);
+    let _ = win.set_resizable(false);
+    let _ = win.set_size(LogicalSize::new(BUBBLE_CHAT_W, BUBBLE_CHAT_H));
+    let _ = win.set_position(LogicalPosition::new(x, y));
+    let _ = win.show();
+    style_chat_head(&win);
+    let _ = win.set_focus();
+    mark_bubble_chat(app, true);
+    lift_bubble_again(app);
+    Ok(())
+}
+
+fn place_bubble_chat(app: &AppHandle, avatar_x: f64, avatar_y: f64) {
+    let (x, y) = bubble_chat_origin(app, avatar_x, avatar_y);
+    if let Some(win) = app.get_webview_window("gemini") {
+        let _ = win.set_position(LogicalPosition::new(x, y));
+    }
+}
+
+fn remember_bubble_point(x: f64, y: f64) {
+    BUBBLE_X.store(x.to_bits(), Ordering::Relaxed);
+    BUBBLE_Y.store(y.to_bits(), Ordering::Relaxed);
+}
+
+fn mark_bubble_chat(app: &AppHandle, open: bool) {
+    emit_label(app, "gemini", "ritmo-chrome", if open { "bubble" } else { "window" });
+    emit_label(app, "bubble", "ritmo-bubble", if open { "open" } else { "closed" });
+    #[cfg(target_os = "macos")]
+    crate::bubble_panel::redraw();
+}
+
+fn emit_label(app: &AppHandle, label: &str, event: &str, payload: &str) {
+    use tauri::Emitter;
+    if app.get_webview_window(label).is_some() {
+        let _ = app.emit_to(label, event, payload);
+    }
 }
 
 pub fn close_owned(app: &AppHandle, label: &str) {
@@ -460,9 +655,7 @@ pub fn close_owned(app: &AppHandle, label: &str) {
             let _ = tell(app, "chat-closed");
         }
         "gemini" => {
-            GEMINI_OPEN.store(false, Ordering::Relaxed);
-            hide_owned(app, "gemini");
-            let _ = tell(app, "gemini-closed");
+            let _ = hide_gemini_window(app);
         }
         "settings" => {
             SETTINGS_OPEN.store(false, Ordering::Relaxed);
@@ -499,16 +692,22 @@ fn open_owned(
         .position(x, y)
         .resizable(true)
         .maximizable(true)
-        .decorations(true)
-        .transparent(false)
-        .shadow(true)
+        .decorations(label != "gemini" && label != "settings")
+        .transparent(label == "gemini" || label == "settings")
+        .shadow(label != "gemini" && label != "settings")
         .skip_taskbar(true)
         .focused(true)
         .visible(true)
         .on_page_load(|window, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 let window = window.clone();
-                let _ = window.clone().run_on_main_thread(move || style_companion(&window));
+                let _ = window.clone().run_on_main_thread(move || {
+                    if window.label() == "gemini" || window.label() == "settings" {
+                        style_card(&window);
+                    } else {
+                        style_companion(&window);
+                    }
+                });
             }
         });
     if let Some(agent) = user_agent {
@@ -583,6 +782,119 @@ fn companion_origin(app: &AppHandle, label: &str, width: f64, height: f64) -> (f
     (x, y)
 }
 
+fn default_bubble_origin(app: &AppHandle) -> (f64, f64) {
+    let Some((origin_x, origin_y, width, height)) = monitor_frame(app, 0.0, 0.0) else {
+        return (24.0, 80.0);
+    };
+    (
+        origin_x + width - AVATAR_SIZE - 20.0,
+        origin_y + height - AVATAR_SIZE - 96.0,
+    )
+}
+
+fn clamp_avatar(app: &AppHandle, x: f64, y: f64) -> (f64, f64) {
+    let Some((origin_x, origin_y, width, height)) = monitor_frame(app, x, y) else {
+        return (x, y);
+    };
+    let margin = 8.0;
+    (
+        x.clamp(origin_x + margin, origin_x + width - AVATAR_SIZE - margin),
+        y.clamp(origin_y + margin, origin_y + height - AVATAR_SIZE - margin),
+    )
+}
+
+fn bubble_chat_origin(app: &AppHandle, avatar_x: f64, avatar_y: f64) -> (f64, f64) {
+    let gap = 12.0;
+    let mut x = avatar_x - gap - BUBBLE_CHAT_W;
+    let mut y = avatar_y + AVATAR_SIZE - BUBBLE_CHAT_H;
+    let Some((origin_x, origin_y, width, height)) = monitor_frame(app, avatar_x, avatar_y) else {
+        return (x, y);
+    };
+    if x < origin_x + 8.0 {
+        x = avatar_x + AVATAR_SIZE + gap;
+    }
+    if x + BUBBLE_CHAT_W > origin_x + width - 8.0 {
+        x = (origin_x + width - BUBBLE_CHAT_W - 8.0).max(origin_x + 8.0);
+    }
+    y = y.clamp(origin_y + 28.0, (origin_y + height - BUBBLE_CHAT_H - 8.0).max(origin_y + 28.0));
+    (x, y)
+}
+
+fn monitor_frame(app: &AppHandle, x: f64, y: f64) -> Option<(f64, f64, f64, f64)> {
+    let monitors = app.available_monitors().ok()?;
+    let mut best: Option<(f64, (f64, f64, f64, f64))> = None;
+    for monitor in monitors {
+        let scale = monitor.scale_factor();
+        if scale <= 0.0 {
+            continue;
+        }
+        let origin_x = monitor.position().x as f64 / scale;
+        let origin_y = monitor.position().y as f64 / scale;
+        let width = monitor.size().width as f64 / scale;
+        let height = monitor.size().height as f64 / scale;
+        let inside = x >= origin_x && x < origin_x + width && y >= origin_y && y < origin_y + height;
+        let distance = (x - (origin_x + width / 2.0)).abs() + (y - (origin_y + height / 2.0)).abs();
+        let score = if inside { 0.0 } else { distance + 10_000.0 };
+        if best.as_ref().map(|(current, _)| score < *current).unwrap_or(true) {
+            best = Some((score, (origin_x, origin_y, width, height)));
+        }
+    }
+    best.map(|(_, frame)| frame)
+}
+
+fn lift_bubble(app: &AppHandle) {
+    if GEMINI_BUBBLE.load(Ordering::Relaxed) {
+        if let Some(win) = app.get_webview_window("gemini") {
+            if win.is_visible().unwrap_or(false) {
+                style_chat_head(&win);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    crate::bubble_panel::lift();
+}
+
+fn lift_bubble_again(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(250));
+        let later = app.clone();
+        let _ = app.run_on_main_thread(move || lift_bubble(&later));
+    });
+}
+
+fn style_avatar(win: &WebviewWindow) {
+    // No llamar a set_always_on_top: en macOS se aplica después y baja
+    // la ventana a un nivel que otras apps tapan.
+    pin_above_apps(win, false);
+}
+
+fn style_chat_head(win: &WebviewWindow) {
+    pin_above_apps(win, false);
+    // El filete lo pinta la página, igual que la agenda. Una máscara nativa lo recorta.
+    round_window(win, 0.0);
+}
+
+fn style_card(win: &WebviewWindow) {
+    style_companion(win);
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2_app_kit::{NSColor, NSWindow};
+
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                if let Some(ns) = unsafe { Retained::retain(ptr.cast::<NSWindow>()) } {
+                    ns.setOpaque(false);
+                    ns.setHasShadow(false);
+                    ns.setBackgroundColor(Some(&NSColor::clearColor()));
+                }
+            }
+        }
+    }
+    round_window(win, 0.0);
+}
+
 fn style_companion(win: &WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
@@ -605,7 +917,9 @@ fn style_companion(win: &WebviewWindow) {
         ns.setLevel(NSFloatingWindowLevel);
         ns.setHidesOnDeactivate(false);
         ns.setMovable(true);
+        ns.setHasShadow(true);
         ns.setTitlebarAppearsTransparent(false);
+        ns.setOpaque(true);
         apply_system_chrome(&ns);
     }
     #[cfg(not(target_os = "macos"))]
@@ -645,8 +959,86 @@ fn apply_system_chrome(ns: &objc2_app_kit::NSWindow) {
 fn restyle_companions(app: &AppHandle) {
     for label in ["chat", "gemini", "settings"] {
         if let Some(win) = app.get_webview_window(label) {
-            style_companion(&win);
+            if label == "gemini" && GEMINI_BUBBLE.load(Ordering::Relaxed) {
+                style_chat_head(&win);
+            } else if label == "gemini" || label == "settings" {
+                style_card(&win);
+            } else {
+                style_companion(&win);
+            }
         }
+    }
+    if let Some(win) = app.get_webview_window("bubble") {
+        style_avatar(&win);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pin_above_apps(win: &WebviewWindow, round: bool) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSColor, NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
+
+    let Ok(ptr) = win.ns_window() else {
+        return;
+    };
+    if ptr.is_null() {
+        return;
+    }
+    let Some(ns) = (unsafe { Retained::retain(ptr.cast::<NSWindow>()) }) else {
+        return;
+    };
+    // Stationary lo mantiene visible al cambiar de espacio. CanJoinAllApplications
+    // lo mete en el espacio de otra app a pantalla completa. No combinar con
+    // MoveToActiveSpace: junto a CanJoinAllSpaces aborta el proceso.
+    let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::FullScreenAuxiliary
+        | NSWindowCollectionBehavior::CanJoinAllApplications
+        | NSWindowCollectionBehavior::Stationary
+        | NSWindowCollectionBehavior::IgnoresCycle;
+    ns.setCollectionBehavior(behavior);
+    ns.setLevel(NSScreenSaverWindowLevel);
+    ns.setHidesOnDeactivate(false);
+    ns.setCanHide(false);
+    ns.setMovable(false);
+    ns.setMovableByWindowBackground(false);
+    ns.setOpaque(false);
+    ns.setHasShadow(round);
+    ns.setBackgroundColor(Some(&NSColor::clearColor()));
+    ns.orderFrontRegardless();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pin_above_apps(win: &WebviewWindow, _round: bool) {
+    let _ = win.set_always_on_top(true);
+}
+
+fn round_window(win: &WebviewWindow, radius: f64) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2_app_kit::NSWindow;
+
+        let Ok(ptr) = win.ns_window() else {
+            return;
+        };
+        if ptr.is_null() {
+            return;
+        }
+        let Some(ns) = (unsafe { Retained::retain(ptr.cast::<NSWindow>()) }) else {
+            return;
+        };
+        let Some(view) = ns.contentView() else {
+            return;
+        };
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            layer.setCornerRadius(radius);
+            layer.setMasksToBounds(radius > 0.0);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (win, radius);
     }
 }
 
@@ -696,6 +1088,72 @@ fn watch_system_theme() {
                 Some(&name),
                 None,
                 NSNotificationSuspensionBehavior::DeliverImmediately,
+            );
+    }
+    std::mem::forget(observer);
+}
+
+#[cfg(target_os = "macos")]
+fn watch_bubble_front() {
+    use objc2::rc::{Allocated, Retained};
+    use objc2::runtime::{AnyObject, NSObject};
+    use objc2::{define_class, msg_send, AnyThread};
+    use objc2_app_kit::{
+        NSApplicationDidResignActiveNotification, NSWorkspace, NSWorkspaceActiveSpaceDidChangeNotification,
+    };
+    use objc2_foundation::NSNotificationCenter;
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[name = "RitmoBubbleObserver"]
+        struct BubbleObserver;
+
+        impl BubbleObserver {
+            #[unsafe(method_id(init))]
+            fn init(this: Allocated<Self>) -> Retained<Self> {
+                let this = this.set_ivars(());
+                unsafe { msg_send![super(this), init] }
+            }
+
+            #[unsafe(method(appResigned:))]
+            fn app_resigned(&self, _notification: Option<&AnyObject>) {
+                lift_from_observer();
+            }
+
+            #[unsafe(method(spaceChanged:))]
+            fn space_changed(&self, _notification: Option<&AnyObject>) {
+                lift_from_observer();
+            }
+        }
+    );
+
+    fn lift_from_observer() {
+        let Some(app) = COMPANION_APP.get() else {
+            return;
+        };
+        let app = app.clone();
+        let _ = app.clone().run_on_main_thread(move || lift_bubble(&app));
+    }
+
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let observer: Retained<BubbleObserver> = unsafe { msg_send![BubbleObserver::alloc(), init] };
+    unsafe {
+        NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
+            &observer,
+            objc2::sel!(appResigned:),
+            Some(NSApplicationDidResignActiveNotification),
+            None,
+        );
+        NSWorkspace::sharedWorkspace()
+            .notificationCenter()
+            .addObserver_selector_name_object(
+                &observer,
+                objc2::sel!(spaceChanged:),
+                Some(NSWorkspaceActiveSpaceDidChangeNotification),
+                None,
             );
     }
     std::mem::forget(observer);

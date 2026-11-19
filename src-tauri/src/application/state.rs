@@ -236,6 +236,14 @@ impl AppState {
             .unwrap_or_else(|_| "alt+super+Space".into())
     }
 
+    pub fn bubble_on_launch(&self) -> Option<(Option<f64>, Option<f64>)> {
+        let prefs = self.inner.prefs.try_lock().ok()?;
+        if !prefs.bubble_avatar {
+            return None;
+        }
+        Some((prefs.bubble_x, prefs.bubble_y))
+    }
+
     pub fn spawn(&self) {
         let inner = Arc::clone(&self.inner);
         tauri::async_runtime::spawn(async move {
@@ -413,8 +421,20 @@ impl Inner {
                 return Err(AppError::message(err));
             }
         }
+        let show_bubble = effects.iter().find_map(|effect| match effect {
+            PrefEffect::Bubble(enabled) => Some(*enabled),
+            _ => None,
+        });
+        let bubble_at = (next.bubble_x, next.bubble_y);
         *self.prefs.lock().await = next;
         self.persist().await?;
+        if let Some(enabled) = show_bubble {
+            if enabled {
+                let _ = crate::shell::show_bubble(&self.app, bubble_at.0, bubble_at.1);
+            } else {
+                crate::shell::hide_bubble(&self.app);
+            }
+        }
         if patch.keys().any(|key| {
             matches!(
                 key.as_str(),
@@ -430,6 +450,21 @@ impl Inner {
             let _ = self.refresh_remote().await;
         }
         self.emit_snapshot().await;
+        Ok(())
+    }
+
+    pub async fn remember_bubble(&self) -> Result<(), AppError> {
+        let (x, y) = crate::shell::bubble_origin(&self.app);
+        self.remember_bubble_at(x, y).await
+    }
+
+    pub async fn remember_bubble_at(&self, x: f64, y: f64) -> Result<(), AppError> {
+        {
+            let mut prefs = self.prefs.lock().await;
+            prefs.bubble_x = Some(x);
+            prefs.bubble_y = Some(y);
+        }
+        self.persist().await?;
         Ok(())
     }
 
@@ -600,7 +635,10 @@ impl Inner {
         };
         let inner = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
-            let text = inner.summarize(true).await;
+            let text = match tokio::time::timeout(std::time::Duration::from_secs(40), inner.summarize(true)).await {
+                Ok(text) => text,
+                Err(_) => "No alcancé a revisar el día. Pulsa actualizar para intentarlo otra vez.".into(),
+            };
             {
                 let mut job = inner.briefing.lock().await;
                 job.text = text.clone();
@@ -807,7 +845,7 @@ impl Inner {
                 if !key.trim().is_empty() {
                     let email = self.account.lock().await.as_ref().map(|account| account.email.clone());
                     let today = self.clock.now().date_naive();
-                    let horizon = today + chrono::Duration::days(i64::from(prefs.range_days));
+                    let horizon = today + chrono::Duration::days(i64::from(prefs.range_days).max(15));
                     if let Ok(agenda) =
                         factorial::load(&self.http, key.trim(), email.as_deref(), today, horizon).await
                     {
@@ -938,6 +976,60 @@ impl Inner {
         Ok(())
     }
 
+    pub async fn clickup_statuses(&self, task_id: &str) -> Result<(String, Vec<clickup::ListStatus>), AppError> {
+        if !self.prefs.lock().await.service_clickup {
+            return Err(AppError::message("Activa ClickUp en Cuenta."));
+        }
+        let task = self
+            .clickup_tasks
+            .lock()
+            .await
+            .iter()
+            .find(|task| task.id == task_id)
+            .cloned()
+            .ok_or_else(|| AppError::message("No encontré esa tarea."))?;
+        let Some(token) = self.secrets.get(secrets::CLICKUP_KEY)?.filter(|key| !key.trim().is_empty()) else {
+            return Err(AppError::message("Falta la clave de ClickUp."));
+        };
+        let token = token.trim();
+        let list = if task.clickup_list.is_empty() {
+            let list = clickup::list_id(&self.http, token, task_id).await?;
+            if let Some(slot) = self.clickup_tasks.lock().await.iter_mut().find(|item| item.id == task_id) {
+                slot.clickup_list = list.clone();
+            }
+            list
+        } else {
+            task.clickup_list
+        };
+        let statuses = clickup::statuses(&self.http, token, &list).await?;
+        Ok((task.status, statuses))
+    }
+
+    pub async fn set_clickup_status(&self, task_id: &str, status: &str) -> Result<(), AppError> {
+        if !self.prefs.lock().await.service_clickup {
+            return Err(AppError::message("Activa ClickUp en Cuenta."));
+        }
+        let known = self.clickup_tasks.lock().await.iter().any(|task| task.id == task_id);
+        if !known {
+            return Err(AppError::message("No encontré esa tarea."));
+        }
+        let Some(token) = self.secrets.get(secrets::CLICKUP_KEY)?.filter(|key| !key.trim().is_empty()) else {
+            return Err(AppError::message("Falta la clave de ClickUp."));
+        };
+        let change = clickup::set_status(&self.http, token.trim(), task_id, status).await?;
+        let mut tasks = self.clickup_tasks.lock().await;
+        if change.closes {
+            tasks.retain(|task| task.id != task_id);
+        } else if let Some(task) = tasks.iter_mut().find(|task| task.id == task_id) {
+            task.status = change.name;
+            task.status_color = change.color;
+            task.updated_at = self.clock.now();
+        }
+        drop(tasks);
+        self.persist().await?;
+        Ok(())
+    }
+
     async fn post_clickup(&self, log: &WorkLog) -> Result<(), AppError> {
         let Some(task_id) = log.task_id.clone().filter(|id| clickup::is_clickup_task(id)) else {
             return Ok(());
@@ -1024,27 +1116,28 @@ impl Inner {
         if !manual && !should_prepare_summary(now, &prefs) {
             return String::new();
         }
-        let question = "Escribe un párrafo de cinco o seis frases sobre cómo viene el día, los huecos y, si hay correo reciente, lo que ese correo pide y todavía no está en la agenda ni en las tareas. No repitas la lista de reuniones ni de tareas. No inventes mensajes. Después, solo si el correo trae algo que la app no muestra, escribe hasta tres líneas con el formato SUGERENCIA|título|detalle|cta. Cada sugerencia es una acción nueva: responder, preparar o dar seguimiento. Si el correo está vacío, no escribas líneas SUGERENCIA.";
+        let question = "Escribe un solo párrafo, de tres o cuatro frases como máximo. Cada frase dice un hecho de hoy: la próxima reunión, un hueco real, una tarea atrasada o un correo que pide algo que no está en la agenda. Sin párrafos extra, sin consejos, sin introducciones y sin frases vagas. No repitas la lista de reuniones ni de tareas. Si no hay nada concreto, una sola frase. No inventes. Después, solo si el correo trae algo nuevo, hasta tres líneas SUGERENCIA|título|detalle|cta.";
         let (system, prompt, local, events, tasks) = self.prompt_parts(question).await;
         if !prefs.service_gemini {
             self.ai_suggestions.lock().await.clear();
-            return local;
+            return crate::domain::tighten_summary(&local);
         }
         let key = self.secrets.get(oauth::GEMINI_KEY).ok().flatten().unwrap_or_default();
         let assistant = GeminiAssistant::new(self.http.clone(), key);
         if !assistant.has_key() {
             self.ai_suggestions.lock().await.clear();
-            return local;
+            return crate::domain::tighten_summary(&local);
         }
         match assistant.complete(&system, &prompt).await {
             Ok(text) => {
                 let (summary, ideas) = crate::domain::split_briefing(&text);
                 *self.ai_suggestions.lock().await = crate::domain::keep_novel(ideas, &events, &tasks);
-                if summary.is_empty() { text } else { summary }
+                let summary = if summary.is_empty() { crate::domain::tighten_summary(&local) } else { summary };
+                summary
             }
             Err(_) => {
                 self.ai_suggestions.lock().await.clear();
-                local
+                crate::domain::tighten_summary(&local)
             }
         }
     }
@@ -1062,6 +1155,8 @@ impl Inner {
         let prefs = self.prefs.lock().await.clone();
         let events = self.events.lock().await.clone();
         let tasks = self.tasks.lock().await.clone();
+        let factorial = self.factorial_events.lock().await.clone();
+        let clickup = self.clickup_tasks.lock().await.clone();
         let notes = self.notes.lock().await.clone();
         let connected = self.account.lock().await.is_some();
         let mail = self.load_mail(&prefs).await;
@@ -1071,6 +1166,8 @@ impl Inner {
             tasks: &tasks,
             notes: &notes,
             mail: &mail,
+            factorial: if prefs.service_factorial { &factorial } else { &[] },
+            clickup: if prefs.service_clickup { &clickup } else { &[] },
             connected,
         };
         let local = local_summary(&ctx, &prefs);
@@ -1095,12 +1192,12 @@ impl Inner {
         let Ok(api) = self.api().await else {
             return self.mail_cache.lock().await.clone();
         };
-        match api.recent_mail().await {
-            Ok(mail) => {
+        match tokio::time::timeout(std::time::Duration::from_secs(12), api.recent_mail()).await {
+            Ok(Ok(mail)) => {
                 *self.mail_cache.lock().await = mail.clone();
                 mail
             }
-            Err(_) => self.mail_cache.lock().await.clone(),
+            _ => self.mail_cache.lock().await.clone(),
         }
     }
 

@@ -284,6 +284,10 @@ pub fn parse_task(value: &serde_json::Value, list_id: &str) -> Option<TaskItem> 
             .and_then(|v| v.as_str())
             .unwrap_or(list_id)
             .to_string(),
+        clickup_list: String::new(),
+        status: String::new(),
+        status_color: String::new(),
+        priority: String::new(),
         updated_at: value
             .get("updated")
             .and_then(|v| v.as_str())
@@ -353,11 +357,16 @@ async fn gemini_complete(
     let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
     let response = http
         .post(url)
+        .timeout(std::time::Duration::from_secs(20))
         .header("x-goog-api-key", key)
         .json(&serde_json::json!({
             "systemInstruction": { "parts": [{ "text": system }] },
             "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
-            "generationConfig": { "maxOutputTokens": 800, "temperature": 0.4 }
+            "generationConfig": {
+                "maxOutputTokens": 420,
+                "temperature": 0.4,
+                "thinkingConfig": { "thinkingBudget": 0 }
+            }
         }))
         .send()
         .await
@@ -374,12 +383,24 @@ async fn gemini_complete(
             .unwrap_or("Gemini rechazó la solicitud");
         return Err(AppError::message(message.to_string()));
     }
-    body.pointer("/candidates/0/content/parts/0/text")
-        .and_then(|v| v.as_str())
+    gemini_reply_text(&body).ok_or_else(|| AppError::message("Gemini no devolvió texto."))
+}
+
+fn gemini_reply_text(body: &serde_json::Value) -> Option<String> {
+    let parts = body.pointer("/candidates/0/content/parts")?.as_array()?;
+    let text = parts
+        .iter()
+        .filter(|part| part.get("thought").and_then(|value| value.as_bool()) != Some(true))
+        .filter_map(|part| part.get("text").and_then(|value| value.as_str()))
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| AppError::message("Gemini no devolvió texto."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 impl GoogleApi {
@@ -537,6 +558,20 @@ mod tests {
         let task = parse_task(&value, "@default").unwrap();
         assert_eq!(task.due, Some(NaiveDate::from_ymd_opt(2026, 10, 24).unwrap()));
         assert!(!task.done);
+    }
+
+    #[test]
+    fn gemini_reply_skips_the_thought_and_keeps_the_answer() {
+        let body = serde_json::json!({
+            "candidates": [{ "content": { "parts": [
+                { "thought": true, "text": "voy a pensar" },
+                { "text": "La tarde queda libre después de la revisión." }
+            ]}}]
+        });
+        assert_eq!(
+            gemini_reply_text(&body).as_deref(),
+            Some("La tarde queda libre después de la revisión.")
+        );
     }
 
 }

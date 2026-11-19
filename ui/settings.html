@@ -11,16 +11,16 @@
 <helmet>
 <style>
 html,body{height:100%}
-body,body.app{margin:0;background:#0c0c0c!important;color:#f5f5f7;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.08px}
+body,body.app{margin:0;background:transparent!important;color:#f5f5f7;overflow:hidden!important;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.08px}
 input::placeholder{color:rgba(235,235,245,.38)}
 @keyframes ritmo-spin{to{transform:rotate(360deg)}}
 </style>
 </helmet>
-<div style="height:100vh;display:flex;flex-direction:column;position:relative;background:#0c0c0c">
-  <div style="padding:12px 16px 10px;display:flex;justify-content:center;border-bottom:.5px solid rgba(255,255,255,.1);flex:none">
+<div style="position:absolute;inset:1px;display:flex;flex-direction:column;box-sizing:border-box;background:#0c0c0c;border-radius:18px;border:.5px solid rgba(255,255,255,.08);overflow:hidden">
+  <div data-tauri-drag-region="deep" style="padding:12px 16px 10px;display:flex;justify-content:center;border-bottom:.5px solid rgba(255,255,255,.1);flex:none">
     <div style="display:flex;gap:2px">
       <sc-for list="{{ prefTabs }}" as="pt" hint-placeholder-count="6">
-        <div onClick="{{ pt.select }}" style="width:64px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;background:{{ pt.bg }}" style-hover="background:rgba(255,255,255,.07)">
+        <div role="tab" onClick="{{ pt.select }}" style="width:64px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;background:{{ pt.bg }}" style-hover="background:rgba(255,255,255,.07)">
           <div style="width:26px;height:26px;border-radius:7px;background:{{ pt.iconBg }};color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;font-weight:600">{{ pt.icon }}</div>
           <span style="font-size:11px;color:{{ pt.fg }}">{{ pt.label }}</span>
         </div>
@@ -100,7 +100,12 @@ input::placeholder{color:rgba(235,235,245,.38)}
                 </select>
               </sc-if>
               <sc-if value="{{ row.isKey }}">
-                <div onClick="{{ row.action }}" style="padding:3px 10px;border-radius:6px;background:rgba(255,255,255,.1);border:.5px solid rgba(255,255,255,.12);font-size:12.5px;letter-spacing:1px;flex:none;cursor:default" style-hover="background:rgba(255,255,255,.16)">{{ row.value }}</div>
+                <div style="display:flex;align-items:center;gap:6px;flex:none">
+                  <div onClick="{{ row.action }}" style="padding:3px 10px;border-radius:6px;background:rgba(255,255,255,.1);border:.5px solid rgba(255,255,255,.12);font-size:12.5px;letter-spacing:1px;cursor:default" style-hover="background:rgba(255,255,255,.16)">{{ row.value }}</div>
+                  <sc-if value="{{ row.canClear }}">
+                    <div onClick="{{ row.clear }}" style="height:24px;padding:0 10px;border-radius:6px;font-size:12px;display:flex;align-items:center;cursor:default;color:#ff6961" style-hover="background:rgba(255,105,97,.12)">Limpiar</div>
+                  </sc-if>
+                </div>
               </sc-if>
               <sc-if value="{{ row.isButton }}">
                 <div onClick="{{ row.action }}" style="height:24px;padding:0 12px;border-radius:6px;background:rgba(255,255,255,.12);font-size:12.5px;display:flex;align-items:center;cursor:default;flex:none;color:{{ row.btnColor }}" style-hover="background:rgba(255,255,255,.18)">{{ row.value }}</div>

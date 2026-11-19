@@ -138,6 +138,47 @@ pub async fn toggle_task(state: State<'_, AppState>, task_id: String) -> Result<
     Ok(state.inner.snapshot().await)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClickUpStatusDto {
+    pub name: String,
+    pub color: String,
+    pub current: bool,
+    pub closes: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClickUpStatusesDto {
+    pub statuses: Vec<ClickUpStatusDto>,
+}
+
+#[tauri::command]
+pub async fn clickup_statuses(state: State<'_, AppState>, task_id: String) -> Result<ClickUpStatusesDto, String> {
+    let (current, statuses) = state.inner.clickup_statuses(&task_id).await.map_err(failure)?;
+    Ok(ClickUpStatusesDto {
+        statuses: statuses
+            .into_iter()
+            .map(|status| ClickUpStatusDto {
+                current: !current.is_empty() && status.name.eq_ignore_ascii_case(&current),
+                name: status.name,
+                color: status.color,
+                closes: status.closes,
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
+pub async fn set_clickup_status(
+    state: State<'_, AppState>,
+    task_id: String,
+    status: String,
+) -> Result<Snapshot, String> {
+    state.inner.set_clickup_status(&task_id, &status).await.map_err(failure)?;
+    Ok(state.inner.snapshot().await)
+}
+
 #[tauri::command]
 pub async fn add_note(
     state: State<'_, AppState>,
@@ -260,6 +301,31 @@ pub fn show_gemini_window(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn hide_gemini_window(app: tauri::AppHandle) -> Result<(), String> {
     crate::shell::hide_gemini_window(&app)
+}
+
+#[tauri::command]
+pub fn bubble_origin(app: tauri::AppHandle) -> (f64, f64) {
+    crate::shell::bubble_origin(&app)
+}
+
+#[tauri::command]
+pub fn place_bubble(app: tauri::AppHandle, x: f64, y: f64) {
+    crate::shell::place_bubble(&app, x, y);
+}
+
+#[tauri::command]
+pub fn toggle_bubble_chat(app: tauri::AppHandle) -> Result<(), String> {
+    crate::shell::toggle_bubble_chat(&app)
+}
+
+#[tauri::command]
+pub fn bubble_chat_open(app: tauri::AppHandle) -> bool {
+    crate::shell::bubble_chat_open(&app)
+}
+
+#[tauri::command]
+pub async fn save_bubble_spot(state: State<'_, AppState>) -> Result<(), String> {
+    state.inner.remember_bubble().await.map_err(failure)
 }
 
 #[tauri::command]

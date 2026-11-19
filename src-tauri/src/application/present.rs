@@ -41,6 +41,7 @@ pub struct Snapshot {
     pub next_color: String,
     pub next_abbr: String,
     pub next_join_url: String,
+    pub show_next: bool,
     pub tasks: Vec<TaskDto>,
     pub notes: Vec<NoteDto>,
     pub calendars: Vec<CalendarDto>,
@@ -90,6 +91,7 @@ pub struct TickDto {
     pub next_color: String,
     pub next_abbr: String,
     pub next_join_url: String,
+    pub show_next: bool,
     pub tray_title: String,
     pub today: Vec<EventDto>,
     pub days: Vec<DayDto>,
@@ -130,6 +132,8 @@ pub struct TaskDto {
     pub late: bool,
     pub done: bool,
     pub done_today: bool,
+    pub status: String,
+    pub status_color: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -167,6 +171,7 @@ pub struct SuggestionDto {
     pub cta: String,
     pub action: String,
     pub target_id: String,
+    pub compact: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -219,6 +224,7 @@ pub struct PrefsDto {
     pub svc_clickup: bool,
     pub chat_ui: String,
     pub shortcut: String,
+    pub bubble_avatar: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -303,6 +309,7 @@ pub fn present(input: PresentInput<'_>) -> Snapshot {
         next_color: agenda.next.color,
         next_abbr: agenda.next.abbr,
         next_join_url: agenda.next.join_url,
+        show_next: agenda.next.event_id.is_empty() || agenda.next.starts_at.date_naive() <= today_date,
         tasks: task_rows(input.tasks, today_date, false),
         clickup_tasks: task_rows(input.clickup_tasks, today_date, false),
         clickup_groups: clickup_groups(input.clickup_tasks, today_date),
@@ -328,22 +335,30 @@ pub fn present(input: PresentInput<'_>) -> Snapshot {
             .collect(),
         pomodoro: pomodoro_dto(input.pomodoro, input.prefs),
         suggestions: {
-            let local = crate::domain::suggestions(
+            let mut chosen = crate::domain::suggestions(
                 &crate::domain::DayContext {
                     now: input.now,
                     events: input.events,
                     tasks: input.tasks,
                     notes: input.notes,
                     mail: input.mail,
+                    factorial: if input.prefs.service_factorial { input.factorial_events } else { &[] },
+                    clickup: if input.prefs.service_clickup { input.clickup_tasks } else { &[] },
                     connected,
                 },
                 input.prefs,
             );
-            let chosen = if input.ai_suggestions.is_empty() {
-                local
-            } else {
-                input.ai_suggestions.to_vec()
-            };
+            if input.prefs.assistant_suggest {
+                for item in input.ai_suggestions {
+                    if chosen.len() >= 6 {
+                        break;
+                    }
+                    if chosen.iter().any(|have| have.title == item.title) {
+                        continue;
+                    }
+                    chosen.push(item.clone());
+                }
+            }
             chosen.into_iter().map(suggestion_dto).collect()
         },
         preferences: prefs_dto(input.prefs),
@@ -405,6 +420,8 @@ fn task_dto(task: &TaskItem, today: chrono::NaiveDate, show_list: bool) -> TaskD
         late,
         done: task.done,
         done_today: task_done_today(today, task),
+        status: task.status.clone(),
+        status_color: task.status_color.clone(),
     }
 }
 
@@ -448,6 +465,7 @@ pub fn tick_from_with(
         next_color: agenda.next.color,
         next_abbr: agenda.next.abbr,
         next_join_url: agenda.next.join_url,
+        show_next: agenda.next.event_id.is_empty() || agenda.next.starts_at.date_naive() <= now.date_naive(),
         tray_title,
         today: agenda.today.into_iter().map(event_dto).collect(),
         days: agenda
@@ -521,6 +539,7 @@ fn suggestion_dto(item: Suggestion) -> SuggestionDto {
         cta: item.cta,
         action: item.action,
         target_id: item.target_id,
+        compact: item.compact,
     }
 }
 
@@ -583,6 +602,7 @@ fn prefs_dto(prefs: &Preferences) -> PrefsDto {
         svc_clickup: prefs.service_clickup,
         chat_ui: prefs.chat_ui.clone(),
         shortcut: shortcut_label(&prefs.panel_shortcut),
+        bubble_avatar: prefs.bubble_avatar,
     }
 }
 
@@ -663,6 +683,9 @@ mod tests {
         let later = after.today.iter().find(|row| row.is_now).unwrap();
         assert_eq!(later.time, "10:31 a. m.");
         assert!(after.today.iter().any(|row| row.title == "Daily" && row.past && !row.live));
+        assert!(during.show_next);
+        let tomorrow = tick_from_with(start - Duration::days(1), &prefs, &pomodoro, &events, true, false, &HashMap::new(), false);
+        assert!(!tomorrow.show_next);
     }
 
     #[test]
@@ -675,6 +698,10 @@ mod tests {
             due: None,
             done: false,
             list_id: place.into(),
+            clickup_list: String::new(),
+            status: String::new(),
+            status_color: String::new(),
+            priority: String::new(),
             updated_at: at(secs),
             completed_at: None,
         };

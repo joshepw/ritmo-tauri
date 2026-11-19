@@ -6,7 +6,8 @@
     "panel",
     "welcome",
     "gemini",
-    "settings"
+    "settings",
+    "bubble"
   ],
   "permissions": [
     "core:default",

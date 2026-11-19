@@ -1,6 +1,6 @@
 [package]
 name = "ritmo"
-version = "0.1.1"
+version = "0.2.0"
 description = "Ritmo: tu día, tus reuniones y tu enfoque en la barra de menú"
 edition = "2021"
 
@@ -37,6 +37,6 @@ urlencoding = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 mac-usernotifications = "0.3"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults", "NSNotification", "NSDistributedNotificationCenter"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSRunningApplication", "NSWindow", "NSView", "NSAppearance", "NSColor", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults", "NSNotification", "NSDistributedNotificationCenter", "NSData", "NSArray", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSRunningApplication", "NSWindow", "NSView", "NSAppearance", "NSColor", "NSWorkspace", "NSPanel", "NSImage", "NSBezierPath", "NSScreen", "NSGraphics", "NSGraphicsContext", "NSEvent", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["CALayer"] }

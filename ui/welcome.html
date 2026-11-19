@@ -234,7 +234,7 @@ html,body{margin:0;height:100%;background:#0c0c0c;color:#f5f5f7;font-family:-app
           <div style="width:72px;height:72px;border-radius:50%;background:rgba(50,215,75,.16);color:#32d74b;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700">✓</div>
           <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
             <span style="font-size:28px;font-weight:700;letter-spacing:-.5px">Ritmo está listo</span>
-            <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6);max-width:420px">A partir de aquí Ritmo vive en la barra de menú. Ábrelo con un clic o con {{ shortcut }}.</span>
+            <span style="font-size:14px;line-height:1.5;color:rgba(235,235,245,.6);max-width:420px">{{ readyLine }}</span>
           </div>
           <div style="width:100%;max-width:420px;border-radius:12px;background:#151515;border:.5px solid rgba(255,255,255,.08);text-align:left;overflow:hidden">
             <sc-for list="{{ summary }}" as="sm" hint-placeholder-count="3">
@@ -296,7 +296,7 @@ class Component extends DCLogic {
         accountInitials: snap.accountInitials || 'G',
         accountAvatar: snap.accountAvatar || '',
         svc: { cal: p.svcCal !== false, tasks: !!p.svcTasks, gemini: !!p.svcGemini },
-        shortcut: p.shortcut || '⌥ ⌘ Espacio',
+        shortcut: p.shortcut || '',
         pref: {
           barTimer: p.barTimer !== false,
           barMeeting: p.barMeeting !== false,
@@ -352,7 +352,7 @@ class Component extends DCLogic {
     };
     const grant = (k) => {
       if (k === 'shortcut') {
-        this.setState((cur) => ({ perm: { ...cur.perm, shortcut: true }, note: 'El atajo ya está activo. Puedes cambiarlo en Preferencias.' }));
+        this.setState((cur) => ({ perm: { ...cur.perm, shortcut: true }, note: s.shortcut ? 'El atajo ya está activo. Puedes cambiarlo en Preferencias.' : 'No hay atajo. Puedes definir uno en Preferencias.' }));
         return;
       }
       if (k === 'login') {
@@ -389,7 +389,7 @@ class Component extends DCLogic {
     const permDefs = [
       ['notif', 'Notificaciones', 'Avisos antes de cada reunión', '!', '#ff453a', 'Permitir'],
       ['login', 'Abrir al iniciar sesión', 'Ritmo se abre solo al encender la Mac', '⏻', '#8e8e93', 'Activar'],
-      ['shortcut', 'Atajo global ' + s.shortcut, 'Se cambia en Preferencias', '⌘', '#0a84ff', 'Listo'],
+      ['shortcut', s.shortcut ? 'Atajo global ' + s.shortcut : 'Sin atajo global', 'Se cambia en Preferencias', '⌘', '#0a84ff', s.shortcut ? 'Listo' : 'Ninguno'],
     ];
     const permCount = Object.values(s.perm).filter(Boolean).length;
     const svcCount = ['cal', 'tasks', 'gemini'].filter((k) => s.svc[k]).length;
@@ -407,6 +407,9 @@ class Component extends DCLogic {
     }));
     return {
       note: s.note, hasNote: !!s.note, shortcut: s.shortcut,
+      readyLine: s.shortcut
+        ? 'A partir de aquí Ritmo vive en la barra de menú. Ábrelo con un clic o con ' + s.shortcut + '.'
+        : 'A partir de aquí Ritmo vive en la barra de menú. Ábrelo con un clic en el icono.',
       steps: labels.map(([label, sub], i) => ({
         label, sub, weight: i === st ? 600 : 400,
         bg: i === st ? 'rgba(255,255,255,.1)' : 'transparent',
