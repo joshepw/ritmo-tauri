@@ -47,6 +47,9 @@ pub struct TaskItem {
     pub list_id: String,
     #[serde(default)]
     pub clickup_list: String,
+    /// Carpeta o espacio de ClickUp. Las listas de un mismo grupo comparten estados.
+    #[serde(default)]
+    pub clickup_group: String,
     #[serde(default)]
     pub status: String,
     #[serde(default)]
@@ -720,6 +723,7 @@ mod tests {
             done,
             list_id: "@default".into(),
             clickup_list: String::new(),
+            clickup_group: String::new(),
             status: String::new(),
             status_color: String::new(),
             priority: String::new(),
@@ -746,6 +750,7 @@ mod tests {
             done: true,
             list_id: "@default".into(),
             clickup_list: String::new(),
+            clickup_group: String::new(),
             status: String::new(),
             status_color: String::new(),
             priority: String::new(),

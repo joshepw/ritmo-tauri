@@ -285,6 +285,7 @@ pub fn parse_task(value: &serde_json::Value, list_id: &str) -> Option<TaskItem> 
             .unwrap_or(list_id)
             .to_string(),
         clickup_list: String::new(),
+        clickup_group: String::new(),
         status: String::new(),
         status_color: String::new(),
         priority: String::new(),

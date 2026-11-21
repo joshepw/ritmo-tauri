@@ -2,11 +2,13 @@ use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 
 use chrono::{DateTime, Local};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::{AppError, TaskItem};
 
 pub const TASK_PREFIX: &str = "clickup:";
+pub const STATUS_TTL_SECS: i64 = 24 * 60 * 60;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {
@@ -14,11 +16,19 @@ pub struct Workspace {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListStatus {
     pub name: String,
     pub color: String,
     pub closes: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusCache {
+    pub statuses: Vec<ListStatus>,
+    pub fetched_at: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -282,6 +292,7 @@ fn task_from(value: &Value, spaces: &HashMap<String, String>) -> Option<TaskItem
         done: false,
         list_id: place_name(value, spaces),
         clickup_list: value.get("list").and_then(|list| list.get("id")).and_then(json_id).unwrap_or_default(),
+        clickup_group: status_group(value),
         status: value
             .get("status")
             .and_then(|item| item.get("status"))
@@ -307,6 +318,30 @@ fn task_from(value: &Value, spaces: &HashMap<String, String>) -> Option<TaskItem
             .unwrap_or_else(Local::now),
         completed_at: None,
     })
+}
+
+pub fn status_group(value: &Value) -> String {
+    if let Some(id) = visible_container_id(value.get("folder")).or_else(|| visible_container_id(value.get("project"))) {
+        return format!("folder:{id}");
+    }
+    if let Some(id) = value.get("space").and_then(|space| space.get("id")).and_then(json_id) {
+        return format!("space:{id}");
+    }
+    if let Some(id) = value.get("list").and_then(|list| list.get("id")).and_then(json_id) {
+        return format!("list:{id}");
+    }
+    String::new()
+}
+
+fn visible_container_id(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if value.get("hidden").and_then(Value::as_bool).unwrap_or(false) {
+        return None;
+    }
+    if value.get("name").and_then(Value::as_str).unwrap_or("").eq_ignore_ascii_case("hidden") {
+        return None;
+    }
+    value.get("id").and_then(json_id)
 }
 
 fn place_name(value: &Value, spaces: &HashMap<String, String>) -> String {
@@ -416,7 +451,7 @@ mod tests {
     fn assigned_tasks_show_the_folder_instead_of_the_list() {
         let tasks = parse_tasks(
             r##"{"tasks":[
-                {"id":"abc","name":"Informe","due_date":"1762340400000","status":{"status":"en curso","type":"custom","color":"#4194f6"},"priority":{"priority":"high","color":"#f8ae00"},"list":{"id":"44","name":"Backlog"},"folder":{"name":"Sitio web","hidden":false}},
+                {"id":"abc","name":"Informe","due_date":"1762340400000","status":{"status":"en curso","type":"custom","color":"#4194f6"},"priority":{"priority":"high","color":"#f8ae00"},"list":{"id":"44","name":"Backlog"},"folder":{"id":"7","name":"Sitio web","hidden":false}},
                 {"id":"done","name":"Cerrada","status":{"type":"closed"},"list":{"name":"Backlog"},"folder":{"name":"Sitio web"}}
             ]}"##,
         )
@@ -426,6 +461,7 @@ mod tests {
         assert_eq!(tasks[0].title, "Informe");
         assert_eq!(tasks[0].list_id, "Sitio web");
         assert_eq!(tasks[0].clickup_list, "44");
+        assert_eq!(tasks[0].clickup_group, "folder:7");
         assert_eq!(tasks[0].status, "en curso");
         assert_eq!(tasks[0].status_color, "#4194f6");
         assert_eq!(tasks[0].priority, "high");
@@ -445,7 +481,9 @@ mod tests {
             "space": { "id": "9" }
         });
         let spaces = HashMap::from([("9".into(), "Cliente".into())]);
-        assert_eq!(task_from(&task, &spaces).unwrap().list_id, "Cliente");
+        let task = task_from(&task, &spaces).unwrap();
+        assert_eq!(task.list_id, "Cliente");
+        assert_eq!(task.clickup_group, "space:9");
     }
 
     #[test]

@@ -17,7 +17,8 @@ input::placeholder{color:rgba(235,235,245,.38)}
 </style>
 </helmet>
 <div style="position:absolute;inset:1px;display:flex;flex-direction:column;box-sizing:border-box;background:#0c0c0c;border-radius:18px;border:.5px solid rgba(255,255,255,.08);overflow:hidden">
-  <div data-tauri-drag-region="deep" style="padding:12px 16px 10px;display:flex;justify-content:center;border-bottom:.5px solid rgba(255,255,255,.1);flex:none">
+  <div data-tauri-drag-region="deep" style="position:relative;padding:12px 16px 10px;display:flex;justify-content:center;border-bottom:.5px solid rgba(255,255,255,.1);flex:none">
+    <div data-nodrag="1" onClick="{{ closePrefs }}" title="Cerrar" style="position:absolute;right:12px;top:50%;margin-top:-12px;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:default;color:rgba(235,235,245,.6);font-size:13px;line-height:1" style-hover="background:rgba(255,255,255,.1)">✕</div>
     <div style="display:flex;gap:2px">
       <sc-for list="{{ prefTabs }}" as="pt" hint-placeholder-count="6">
         <div role="tab" onClick="{{ pt.select }}" style="width:64px;padding:6px 0 5px;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default;background:{{ pt.bg }}" style-hover="background:rgba(255,255,255,.07)">

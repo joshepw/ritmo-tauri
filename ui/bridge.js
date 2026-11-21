@@ -19,6 +19,26 @@
     return /settings\.html$/.test(window.location.pathname);
   }
 
+  function applyUpdate(component, result, silent) {
+    if (!result) return;
+    component.setState({
+      updateChecking: false,
+      appVersion: result.current || component.state.appVersion,
+      updateAvailable: !!result.available,
+      updateVersion: result.version || '',
+      updateNotes: result.notes || '',
+    });
+    if (!silent) {
+      toast(component, result.available ? 'Hay una versión nueva: ' + result.version : 'Ya tienes la última versión.');
+      if (result.available) component._updateTold = true;
+      return;
+    }
+    if (result.available && !settingsSurface() && !component._updateTold) {
+      component._updateTold = true;
+      toast(component, 'Hay una actualización: ' + result.version + '. Instálala en Preferencias.');
+    }
+  }
+
   function toast(component, text, color, abbr) {
     component.setState({ toast: { text: messageOf(text), color: color || '#0a84ff', abbr: abbr || '·' } });
     clearTimeout(component.tt);
@@ -156,25 +176,19 @@
       } finally {
         component.setState({ booting: false });
       }
-      setTimeout(() => Ritmo.checkUpdate(component, true), 2500);
+      await api().event.listen('ritmo-update', (event) => applyUpdate(component, event.payload, true));
+      try {
+        const pending = await invoke('pending_update');
+        if (pending) applyUpdate(component, pending, true);
+      } catch (error) {
+        /* La búsqueda diaria vuelve a intentarlo. */
+      }
     },
     async checkUpdate(component, silent) {
       if (component.state.updateChecking || component.state.updateInstalling) return;
       component.setState({ updateChecking: true });
       try {
-        const result = await invoke('check_update');
-        component.setState({
-          updateChecking: false,
-          appVersion: result.current || component.state.appVersion,
-          updateAvailable: !!result.available,
-          updateVersion: result.version || '',
-          updateNotes: result.notes || '',
-        });
-        if (!silent) {
-          toast(component, result.available ? 'Hay una versión nueva: ' + result.version : 'Ya tienes la última versión.');
-        } else if (result.available && !settingsSurface()) {
-          toast(component, 'Hay una actualización: ' + result.version + '. Instálala en Preferencias.');
-        }
+        applyUpdate(component, await invoke('check_update'), silent);
       } catch (error) {
         component.setState({ updateChecking: false });
         if (!silent) toast(component, error);
@@ -488,12 +502,12 @@
   window.RitmoDefine = function (DCLogic) {
     return class Component extends DCLogic {
       state = {
-        prefsOpen: false, prefsTab: 'cuenta', connected: false, isApp: false,
+        prefsOpen: false, prefsTab: 'general', connected: false, isApp: false,
         accountName: 'Sin cuenta conectada', accountEmail: 'Conecta tu cuenta de Google',
         accountInitials: 'G', accountAvatar: '', accountStatus: 'Desconectado', accountStatusColor: 'rgba(235,235,245,.5)',
         weekdayLabel: '', dateLong: '', menuClock: '', nowMark: '', barMeetingLabel: '',
         showBarTimer: true, showBarMeeting: false,
-        p: { login: true, barTimer: true, barMeeting: true, barMeetMin: '1 h', range: '7 días', linkRows: [
+        p: { login: true, dockIcon: false, barTimer: true, barMeeting: true, barMeetMin: '1 h', range: '7 días', linkRows: [
           { key: 'openZoom', label: 'Abrir Zoom', value: 'nativeApp' },
           { key: 'openTeams', label: 'Abrir Microsoft Teams', value: 'defaultBrowser' },
           { key: 'openWebex', label: 'Abrir Webex', value: 'defaultBrowser' },
@@ -535,6 +549,7 @@
             if (event.payload === 'chat-closed' && this.state.chatOpen) this.setState({ chatOpen: false });
             if (event.payload === 'gemini-closed' && this.state.aiOpen) this.setState({ aiOpen: false });
             if (event.payload === 'settings-closed' && this.state.prefsOpen) this.setState({ prefsOpen: false });
+            if (event.payload === 'settings-opened' && settingsSurface()) this.setState({ prefsTab: 'general' });
             if (event.payload === 'open-notes') this.setState({ tab: 'notas' });
           });
         }
@@ -808,7 +823,7 @@
         const groups = {
           general: [
             { title: 'Acerca de', rows: [{ label: 'Ritmo ' + (state.appVersion || '0.1.0'), sub: 'Tu día, tus reuniones y tu enfoque en la barra de menú' }] },
-            { title: 'Inicio', rows: [toggle('login', 'Abrir al iniciar sesión'), { isKey: true, label: 'Atajo para abrir el panel', sub: state.shortcutRecording ? 'Pulsa la combinación. Esc cancela.' : (prefs.shortcut ? 'Pulsa el atajo para cambiarlo' : 'Sin atajo. El panel se abre desde el icono.'), value: state.shortcutRecording ? '…' : (prefs.shortcut || 'Sin atajo'), canClear: !!prefs.shortcut && !state.shortcutRecording, action: () => this.captureShortcut(), clear: () => Ritmo.patch(this, { shortcut: '' }) }] },
+            { title: 'Inicio', rows: [toggle('login', 'Abrir al iniciar sesión'), toggle('dockIcon', 'Mostrar icono en el Dock', 'Si lo ocultas, Ritmo sigue en la barra de menú'), { isKey: true, label: 'Atajo para abrir el panel', sub: state.shortcutRecording ? 'Pulsa la combinación. Esc cancela.' : (prefs.shortcut ? 'Pulsa el atajo para cambiarlo' : 'Sin atajo. El panel se abre desde el icono.'), value: state.shortcutRecording ? '…' : (prefs.shortcut || 'Sin atajo'), canClear: !!prefs.shortcut && !state.shortcutRecording, action: () => this.captureShortcut(), clear: () => Ritmo.patch(this, { shortcut: '' }) }] },
             { title: 'Barra de menú', rows: [toggle('barTimer', 'Mostrar tiempo del pomodoro'), toggle('barMeeting', 'Mostrar cuenta regresiva de la próxima reunión'), choice('barMeetMin', 'Mostrar reuniones desde', ['15 min', '1 h', '12 h', '24 h', 'Hoy', 'Siempre'], 'Hoy muestra solo las que faltan hoy')] },
             { title: 'App', rows: [
               {

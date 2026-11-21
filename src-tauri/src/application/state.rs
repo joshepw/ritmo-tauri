@@ -143,6 +143,8 @@ pub struct Inner {
     factorial_ready: AtomicBool,
     clickup_team: Mutex<Option<String>>,
     clickup_loading: AtomicBool,
+    clickup_statuses: Mutex<HashMap<String, clickup::StatusCache>>,
+    known_update: Mutex<Option<KnownUpdate>>,
     app: AppHandle,
     mail_cache: Mutex<Vec<crate::domain::MailHint>>,
     ai_suggestions: Mutex<Vec<crate::domain::Suggestion>>,
@@ -153,6 +155,14 @@ pub struct Inner {
 struct Briefing {
     text: String,
     running: bool,
+}
+
+#[derive(Clone)]
+pub struct KnownUpdate {
+    pub available: bool,
+    pub current: String,
+    pub version: String,
+    pub notes: String,
 }
 
 #[derive(Clone)]
@@ -206,6 +216,8 @@ impl AppState {
             factorial_ready: AtomicBool::new(disk.factorial_employee_id.is_some()),
             clickup_team: Mutex::new(disk.clickup_team_id.clone()),
             clickup_loading: AtomicBool::new(false),
+            clickup_statuses: Mutex::new(disk.clickup_statuses.clone()),
+            known_update: Mutex::new(None),
             app: app.clone(),
             mail_cache: Mutex::new(Vec::new()),
             ai_suggestions: Mutex::new(Vec::new()),
@@ -226,6 +238,14 @@ impl AppState {
 
     pub fn setup_complete(&self) -> bool {
         self.inner.setup_done.load(Ordering::Relaxed)
+    }
+
+    pub fn show_dock_icon(&self) -> bool {
+        self.inner
+            .prefs
+            .try_lock()
+            .map(|prefs| prefs.show_dock_icon)
+            .unwrap_or(false)
     }
 
     pub fn panel_shortcut(&self) -> String {
@@ -425,6 +445,10 @@ impl Inner {
             PrefEffect::Bubble(enabled) => Some(*enabled),
             _ => None,
         });
+        let show_dock = effects.iter().find_map(|effect| match effect {
+            PrefEffect::Dock(enabled) => Some(*enabled),
+            _ => None,
+        });
         let bubble_at = (next.bubble_x, next.bubble_y);
         *self.prefs.lock().await = next;
         self.persist().await?;
@@ -434,6 +458,9 @@ impl Inner {
             } else {
                 crate::shell::hide_bubble(&self.app);
             }
+        }
+        if let Some(enabled) = show_dock {
+            crate::shell::apply_dock_icon(&self.app, enabled);
         }
         if patch.keys().any(|key| {
             matches!(
@@ -713,6 +740,7 @@ impl Inner {
             return Err(AppError::message("La clave está vacía."));
         }
         clickup::check_key(&self.http, key).await?;
+        self.clickup_statuses.lock().await.clear();
         self.secrets.set(secrets::CLICKUP_KEY, key)?;
         self.prefs.lock().await.service_clickup = true;
         self.persist().await?;
@@ -724,6 +752,7 @@ impl Inner {
         self.secrets.delete(secrets::CLICKUP_KEY)?;
         self.prefs.lock().await.service_clickup = false;
         self.clickup_tasks.lock().await.clear();
+        self.clickup_statuses.lock().await.clear();
         *self.clickup_team.lock().await = None;
         self.persist().await?;
         self.emit_snapshot().await;
@@ -867,6 +896,7 @@ impl Inner {
                         if let Ok(tasks) = clickup::assigned_tasks(&self.http, token.trim(), &workspace).await {
                             *self.clickup_tasks.lock().await = tasks;
                         }
+                        self.warm_status_cache(token.trim()).await;
                     }
                     self.clickup_loading.store(false, Ordering::Relaxed);
                 }
@@ -992,6 +1022,10 @@ impl Inner {
             return Err(AppError::message("Falta la clave de ClickUp."));
         };
         let token = token.trim();
+        let key = Self::status_key(&task);
+        if let Some(statuses) = self.cached_statuses(&key).await {
+            return Ok((task.status, statuses));
+        }
         let list = if task.clickup_list.is_empty() {
             let list = clickup::list_id(&self.http, token, task_id).await?;
             if let Some(slot) = self.clickup_tasks.lock().await.iter_mut().find(|item| item.id == task_id) {
@@ -1002,7 +1036,98 @@ impl Inner {
             task.clickup_list
         };
         let statuses = clickup::statuses(&self.http, token, &list).await?;
+        self.store_statuses(&key, statuses.clone()).await;
         Ok((task.status, statuses))
+    }
+
+fn status_key(task: &crate::domain::TaskItem) -> String {
+    if !task.clickup_group.is_empty() {
+        return task.clickup_group.clone();
+    }
+    if !task.clickup_list.is_empty() {
+        return format!("list:{}", task.clickup_list);
+    }
+    String::new()
+}
+
+    async fn cached_statuses(&self, key: &str) -> Option<Vec<clickup::ListStatus>> {
+        if key.is_empty() {
+            return None;
+        }
+        self.clickup_statuses
+            .lock()
+            .await
+            .get(key)
+            .filter(|row| !row.statuses.is_empty())
+            .map(|row| row.statuses.clone())
+    }
+
+    async fn store_statuses(&self, key: &str, statuses: Vec<clickup::ListStatus>) {
+        if key.is_empty() || statuses.is_empty() {
+            return;
+        }
+        self.clickup_statuses.lock().await.insert(
+            key.to_string(),
+            clickup::StatusCache {
+                statuses,
+                fetched_at: self.clock.now().timestamp(),
+            },
+        );
+        let _ = self.persist().await;
+    }
+
+    async fn warm_status_cache(&self, token: &str) {
+        let tasks = self.clickup_tasks.lock().await.clone();
+        let mut wanted = HashMap::new();
+        for task in &tasks {
+            let key = Self::status_key(task);
+            if key.is_empty() || task.clickup_list.is_empty() {
+                continue;
+            }
+            wanted.entry(key).or_insert_with(|| task.clickup_list.clone());
+        }
+        let now = self.clock.now().timestamp();
+        let mut stale = Vec::new();
+        {
+            let cache = self.clickup_statuses.lock().await;
+            for (key, list) in wanted {
+                let fresh = cache.get(&key).is_some_and(|row| {
+                    !row.statuses.is_empty() && now.saturating_sub(row.fetched_at) < clickup::STATUS_TTL_SECS
+                });
+                if !fresh {
+                    stale.push((key, list));
+                }
+            }
+        }
+        let mut changed = false;
+        for (key, list) in stale {
+            if let Ok(statuses) = clickup::statuses(&self.http, token, &list).await {
+                self.clickup_statuses.lock().await.insert(
+                    key,
+                    clickup::StatusCache {
+                        statuses,
+                        fetched_at: now,
+                    },
+                );
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = self.persist().await;
+        }
+    }
+
+    pub async fn remember_update(&self, available: bool, current: String, version: String, notes: String) {
+        *self.known_update.lock().await = Some(KnownUpdate {
+            available,
+            current,
+            version,
+            notes,
+        });
+    }
+
+    pub async fn known_update(&self) -> Option<KnownUpdate> {
+        self.known_update.lock().await.clone()
     }
 
     pub async fn set_clickup_status(&self, task_id: &str, status: &str) -> Result<(), AppError> {
@@ -1393,6 +1518,7 @@ impl Inner {
             work_logs: self.work_logs.lock().await.clone(),
             factorial_employee_id: self.factorial_employee.lock().await.clone(),
             clickup_team_id: self.clickup_team.lock().await.clone(),
+            clickup_statuses: self.clickup_statuses.lock().await.clone(),
         };
         persist::save(&self.app, &data)
     }

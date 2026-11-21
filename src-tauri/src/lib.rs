@@ -7,7 +7,7 @@ mod shell;
 #[cfg(target_os = "macos")]
 mod bubble_panel;
 
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,12 +22,33 @@ pub fn run() {
         .setup(|app| {
             let state = application::AppState::bootstrap(app.handle());
             app.manage(state.clone());
+            shell::remember_dock_icon(state.show_dock_icon());
             let shortcut = state.panel_shortcut();
             shell::install(app, &shortcut)?;
             if !state.setup_complete() {
                 shell::open_welcome(app.handle())?;
             }
             state.spawn();
+            let updater = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if let Ok(update) = commands::fetch_update(&updater).await {
+                        if let Some(state) = updater.try_state::<application::AppState>() {
+                            state
+                                .inner
+                                .remember_update(
+                                    update.available,
+                                    update.current.clone(),
+                                    update.version.clone(),
+                                    update.notes.clone(),
+                                )
+                                .await;
+                        }
+                        let _ = updater.emit("ritmo-update", &update);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+                }
+            });
             if let Some((x, y)) = state.bubble_on_launch() {
                 let _ = shell::show_bubble(app.handle(), x, y);
             }
@@ -71,6 +92,7 @@ pub fn run() {
             commands::notifications_allowed,
             commands::video_apps,
             commands::check_update,
+            commands::pending_update,
             commands::install_update,
             commands::quit
         ])

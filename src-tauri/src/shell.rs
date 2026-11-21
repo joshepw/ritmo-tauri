@@ -28,6 +28,7 @@ const BUBBLE_CHAT_W: f64 = 360.0;
 const BUBBLE_CHAT_H: f64 = 560.0;
 static HIDE_TICK: AtomicU64 = AtomicU64::new(0);
 static WELCOME_OPEN: AtomicBool = AtomicBool::new(false);
+static SHOW_DOCK: AtomicBool = AtomicBool::new(false);
 
 /// Puts the app in the Dock while `body` runs and returns it to the menu bar after.
 /// macOS only shows the permission prompt, and only lists the app in
@@ -61,15 +62,39 @@ fn set_menu_bar_policy(app: &AppHandle) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
+    let show_dock = SHOW_DOCK.load(Ordering::Relaxed);
     let _ = app.run_on_main_thread(move || {
         if let Some(marker) = MainThreadMarker::new() {
             let ns_app = NSApplication::sharedApplication(marker);
-            let _ = ns_app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+            let policy = if show_dock {
+                NSApplicationActivationPolicy::Regular
+            } else {
+                NSApplicationActivationPolicy::Accessory
+            };
+            let _ = ns_app.setActivationPolicy(policy);
+            if show_dock {
+                #[allow(deprecated)]
+                ns_app.activateIgnoringOtherApps(true);
+            }
         }
         // El panel del avatar solo entra en un espacio a pantalla completa
-        // si se crea con la app ya en modo accesorio.
+        // si se crea con la política ya aplicada.
         crate::bubble_panel::recreate_after_policy();
     });
+}
+
+/// Remembers whether the Dock icon should stay visible. Applied on the next policy change.
+pub fn remember_dock_icon(show: bool) {
+    SHOW_DOCK.store(show, Ordering::Relaxed);
+}
+
+/// Shows or hides the Dock icon and recreates the floating avatar under that policy.
+pub fn apply_dock_icon(app: &AppHandle, show: bool) {
+    remember_dock_icon(show);
+    #[cfg(target_os = "macos")]
+    set_menu_bar_policy(app);
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
 /// Asks macOS for notification permission. Blocks: call it off the main thread.
@@ -280,23 +305,218 @@ pub fn register_panel_shortcut(app: &AppHandle, spec: &str) -> Result<(), String
     Ok(())
 }
 
-fn place(win: &WebviewWindow, rect: Rect) {
-    let scale = win.scale_factor().unwrap_or(1.0);
-    let position: PhysicalPosition<f64> = rect.position.to_physical(scale);
-    let size: PhysicalSize<f64> = rect.size.to_physical(scale);
-    let outer = win.outer_size().unwrap_or(PhysicalSize::new(AGENDA_W as u32, PANEL_H as u32));
-    let (width, height) = (outer.width as f64, outer.height as f64);
-    let mut x = position.x + size.width / 2.0 - (width - PANEL_ANCHOR * scale);
-    let mut y = position.y + size.height + MENU_GAP * scale;
-    if let Ok(Some(monitor)) = win.current_monitor() {
-        let (origin_x, origin_y) = (monitor.position().x as f64, monitor.position().y as f64);
-        let (monitor_w, monitor_h) = (monitor.size().width as f64, monitor.size().height as f64);
-        if position.y > origin_y + monitor_h / 2.0 {
-            y = position.y - height - MENU_GAP * scale;
-        }
-        x = x.max(origin_x).min(origin_x + monitor_w - width);
+#[derive(Clone, Copy)]
+struct ScreenBox {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    menu: f64,
+    scale: f64,
+}
+
+fn place_panel(app: &AppHandle, win: &WebviewWindow, rect: Option<Rect>) {
+    let screens = screen_boxes(app);
+    let Some(screen) = choose_screen(app, &screens, rect.as_ref()) else {
+        return;
+    };
+    let win_scale = win.scale_factor().unwrap_or(screen.scale).max(0.1);
+    let outer = win
+        .outer_size()
+        .unwrap_or(PhysicalSize::new((AGENDA_W * win_scale) as u32, (PANEL_H * win_scale) as u32));
+    let width = outer.width as f64 / win_scale;
+    let height = outer.height as f64 / win_scale;
+    let icon = rect.as_ref().and_then(|rect| icon_point(rect, &screens));
+    let mut x = if icon.is_some_and(|icon| contains_screen(&screen, icon.0, icon.1)) {
+        let (cx, _) = icon.unwrap_or((0.0, 0.0));
+        cx - (width - PANEL_ANCHOR)
+    } else {
+        screen.x + screen.width - width - 8.0
+    };
+    let mut y = screen.y + screen.menu + MENU_GAP;
+    let max_x = (screen.x + screen.width - width).max(screen.x);
+    let max_y = (screen.y + screen.height - height).max(screen.y);
+    x = x.clamp(screen.x, max_x);
+    y = y.clamp(screen.y, max_y);
+    move_window(win, x, y);
+}
+
+fn choose_screen(app: &AppHandle, screens: &[ScreenBox], rect: Option<&Rect>) -> Option<ScreenBox> {
+    if screens.is_empty() {
+        return None;
     }
-    let _ = win.set_position(PhysicalPosition::new(x, y));
+    if let Some(rect) = rect {
+        if let Some((x, y)) = icon_point(rect, screens) {
+            if let Some(screen) = screens.iter().copied().find(|screen| contains_screen(screen, x, y)) {
+                return Some(screen);
+            }
+        }
+    }
+    focused_screen(screens)
+        .or_else(|| cursor_screen(app, screens))
+        .or_else(|| screens.first().copied())
+}
+
+fn contains_screen(screen: &ScreenBox, x: f64, y: f64) -> bool {
+    x >= screen.x && x < screen.x + screen.width && y >= screen.y && y < screen.y + screen.height
+}
+
+fn icon_point(rect: &Rect, screens: &[ScreenBox]) -> Option<(f64, f64)> {
+    use tauri::{PhysicalPosition, PhysicalSize, Position, Size};
+    let (x, y, w, h, physical) = match (rect.position, rect.size) {
+        (Position::Physical(PhysicalPosition { x, y }), Size::Physical(PhysicalSize { width, height })) => {
+            (x as f64, y as f64, width as f64, height as f64, true)
+        }
+        (Position::Physical(PhysicalPosition { x, y }), Size::Logical(size)) => {
+            (x as f64, y as f64, size.width, size.height, true)
+        }
+        (Position::Logical(pos), Size::Logical(size)) => (pos.x, pos.y, size.width, size.height, false),
+        (Position::Logical(pos), Size::Physical(PhysicalSize { width, height })) => {
+            (pos.x, pos.y, width as f64, height as f64, false)
+        }
+    };
+    if !physical {
+        return Some((x + w / 2.0, y + h / 2.0));
+    }
+    screens.iter().find_map(|screen| {
+        let scale = screen.scale.max(0.1);
+        let cx = x / scale + (w / scale) / 2.0;
+        let cy = y / scale + (h / scale) / 2.0;
+        contains_screen(screen, cx, cy).then_some((cx, cy))
+    })
+}
+
+fn screen_boxes(app: &AppHandle) -> Vec<ScreenBox> {
+    #[cfg(target_os = "macos")]
+    if let Some(boxes) = macos_screens() {
+        if !boxes.is_empty() {
+            return boxes;
+        }
+    }
+    monitor_boxes(app)
+}
+
+fn monitor_boxes(app: &AppHandle) -> Vec<ScreenBox> {
+    app.available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|monitor| {
+            let scale = monitor.scale_factor();
+            if scale <= 0.0 {
+                return None;
+            }
+            Some(ScreenBox {
+                x: monitor.position().x as f64 / scale,
+                y: monitor.position().y as f64 / scale,
+                width: monitor.size().width as f64 / scale,
+                height: monitor.size().height as f64 / scale,
+                menu: 0.0,
+                scale,
+            })
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn display_pixels_high() -> f64 {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayPixelsHigh(display: u32) -> u32;
+    }
+    unsafe { CGDisplayPixelsHigh(CGMainDisplayID()) as f64 }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_screens() -> Option<Vec<ScreenBox>> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let marker = MainThreadMarker::new()?;
+    let screens = NSScreen::screens(marker);
+    let count = screens.count();
+    if count == 0 {
+        return None;
+    }
+    let flip = display_pixels_high();
+    let mut boxes = Vec::with_capacity(count);
+    for index in 0..count {
+        let screen = screens.objectAtIndex(index);
+        let frame = screen.frame();
+        let visible = screen.visibleFrame();
+        let top = frame.origin.y + frame.size.height;
+        let visible_top = visible.origin.y + visible.size.height;
+        boxes.push(ScreenBox {
+            x: frame.origin.x,
+            y: flip - top,
+            width: frame.size.width,
+            height: frame.size.height,
+            menu: (top - visible_top).max(0.0),
+            scale: screen.backingScaleFactor().max(1.0),
+        });
+    }
+    Some(boxes)
+}
+
+#[cfg(target_os = "macos")]
+fn focused_screen(screens: &[ScreenBox]) -> Option<ScreenBox> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let marker = MainThreadMarker::new()?;
+    let main = NSScreen::mainScreen(marker)?;
+    let frame = main.frame();
+    let x = frame.origin.x;
+    let y = display_pixels_high() - (frame.origin.y + frame.size.height);
+    screens.iter().copied().find(|screen| (screen.x - x).abs() < 2.0 && (screen.y - y).abs() < 2.0)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focused_screen(_screens: &[ScreenBox]) -> Option<ScreenBox> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn cursor_screen(_app: &AppHandle, screens: &[ScreenBox]) -> Option<ScreenBox> {
+    use objc2_app_kit::NSEvent;
+
+    let point = NSEvent::mouseLocation();
+    let x = point.x;
+    let y = display_pixels_high() - point.y;
+    screens.iter().copied().find(|screen| contains_screen(screen, x, y))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cursor_screen(app: &AppHandle, screens: &[ScreenBox]) -> Option<ScreenBox> {
+    let point = app.cursor_position().ok()?;
+    let (x, y) = screens.iter().find_map(|screen| {
+        let scale = screen.scale.max(0.1);
+        let x = point.x / scale;
+        let y = point.y / scale;
+        contains_screen(screen, x, y).then_some((x, y))
+    })?;
+    screens.iter().copied().find(|screen| contains_screen(screen, x, y))
+}
+
+fn move_window(win: &WebviewWindow, x: f64, y: f64) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2_app_kit::NSWindow;
+        use objc2_foundation::NSPoint;
+
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                if let Some(ns) = unsafe { Retained::retain(ptr.cast::<NSWindow>()) } {
+                    let frame = ns.frame();
+                    let origin_y = display_pixels_high() - y - frame.size.height;
+                    ns.setFrameOrigin(NSPoint::new(x, origin_y));
+                    return;
+                }
+            }
+        }
+    }
+    let _ = win.set_position(LogicalPosition::new(x, y));
 }
 
 fn toggle_panel(app: &AppHandle, rect: Option<Rect>) {
@@ -308,9 +528,7 @@ fn toggle_panel(app: &AppHandle, rect: Option<Rect>) {
         hide_panel(app);
         return;
     }
-    if let Some(rect) = rect {
-        place(&win, rect);
-    }
+    place_panel(app, &win, rect);
     let _ = win.set_visible_on_all_workspaces(true);
     pin_over_fullscreen(&win);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -322,6 +540,38 @@ fn toggle_panel(app: &AppHandle, rect: Option<Rect>) {
     let _ = win.set_focus();
     pin_over_fullscreen(&win);
     restore_owned(app);
+    pin_panel_again(app);
+}
+
+fn pin_panel_again(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(250));
+        let later = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(win) = later.get_webview_window("panel") {
+                if win.is_visible().unwrap_or(false) {
+                    pin_over_fullscreen(&win);
+                }
+            }
+            for label in ["chat", "gemini", "settings"] {
+                if label == "gemini" && GEMINI_BUBBLE.load(Ordering::Relaxed) {
+                    continue;
+                }
+                let Some(win) = later.get_webview_window(label) else {
+                    continue;
+                };
+                if !win.is_visible().unwrap_or(false) {
+                    continue;
+                }
+                if label == "chat" {
+                    style_companion(&win);
+                } else {
+                    style_card(&win);
+                }
+            }
+        });
+    });
 }
 
 pub fn hide_panel(app: &AppHandle) {
@@ -368,7 +618,7 @@ fn pin_over_fullscreen(win: &WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
         use objc2::rc::Retained;
-        use objc2_app_kit::{NSFloatingWindowLevel, NSWindow, NSWindowCollectionBehavior};
+        use objc2_app_kit::{NSPopUpMenuWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
         let Ok(ptr) = win.ns_window() else {
             return;
@@ -386,10 +636,11 @@ fn pin_over_fullscreen(win: &WebviewWindow) {
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::CanJoinAllApplications;
         ns.setCollectionBehavior(behavior);
-        ns.setLevel(NSFloatingWindowLevel);
+        ns.setLevel(NSPopUpMenuWindowLevel);
         ns.setHidesOnDeactivate(false);
         ns.setMovable(false);
         ns.setMovableByWindowBackground(false);
+        ns.orderFrontRegardless();
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -469,6 +720,7 @@ pub fn show_settings_window(app: &AppHandle) -> Result<(), String> {
         let _ = win.set_decorations(false);
         style_card(&win);
     }
+    emit_label(app, "settings", "ritmo-surface", "settings-opened");
     Ok(())
 }
 
@@ -727,19 +979,31 @@ fn hide_owned(app: &AppHandle, label: &str) {
 
 fn restore_owned(app: &AppHandle) {
     if CHAT_OPEN.load(Ordering::Relaxed) {
-        if let Some(win) = app.get_webview_window("chat") {
-            let _ = win.show();
-        }
+        place_owned(app, "chat");
     }
-    if GEMINI_OPEN.load(Ordering::Relaxed) {
-        if let Some(win) = app.get_webview_window("gemini") {
-            let _ = win.show();
-        }
+    if GEMINI_OPEN.load(Ordering::Relaxed) && !GEMINI_BUBBLE.load(Ordering::Relaxed) {
+        place_owned(app, "gemini");
     }
     if SETTINGS_OPEN.load(Ordering::Relaxed) {
-        if let Some(win) = app.get_webview_window("settings") {
-            let _ = win.show();
-        }
+        place_owned(app, "settings");
+    }
+}
+
+fn place_owned(app: &AppHandle, label: &str) {
+    let Some(win) = app.get_webview_window(label) else {
+        return;
+    };
+    let scale = win.scale_factor().unwrap_or(1.0).max(0.1);
+    let size = win.outer_size().unwrap_or(PhysicalSize::new(360, 480));
+    let width = size.width as f64 / scale;
+    let height = size.height as f64 / scale;
+    let (x, y) = companion_origin(app, label, width, height);
+    move_window(&win, x, y);
+    let _ = win.show();
+    if label == "chat" {
+        style_companion(&win);
+    } else {
+        style_card(&win);
     }
 }
 
@@ -899,7 +1163,7 @@ fn style_companion(win: &WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
         use objc2::rc::Retained;
-        use objc2_app_kit::{NSFloatingWindowLevel, NSWindow, NSWindowCollectionBehavior};
+        use objc2_app_kit::{NSPopUpMenuWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
         let Ok(ptr) = win.ns_window() else {
             return;
@@ -914,8 +1178,9 @@ fn style_companion(win: &WebviewWindow) {
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::CanJoinAllApplications;
         ns.setCollectionBehavior(behavior);
-        ns.setLevel(NSFloatingWindowLevel);
+        ns.setLevel(NSPopUpMenuWindowLevel);
         ns.setHidesOnDeactivate(false);
+        ns.orderFrontRegardless();
         ns.setMovable(true);
         ns.setHasShadow(true);
         ns.setTitlebarAppearsTransparent(false);

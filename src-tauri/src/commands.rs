@@ -11,7 +11,7 @@ pub fn quit(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDto {
     pub available: bool,
@@ -32,8 +32,7 @@ fn update_error(err: impl std::fmt::Display) -> String {
     format!("No se pudo buscar la actualización. {text}")
 }
 
-#[tauri::command]
-pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateDto, String> {
+pub async fn fetch_update(app: &tauri::AppHandle) -> Result<UpdateDto, String> {
     let current = app.package_info().version.to_string();
     let updater = app.updater().map_err(update_error)?;
     match updater.check().await {
@@ -51,6 +50,30 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateDto, String> {
         }),
         Err(err) => Err(update_error(err)),
     }
+}
+
+async fn remember(state: &AppState, update: &UpdateDto) {
+    state
+        .inner
+        .remember_update(update.available, update.current.clone(), update.version.clone(), update.notes.clone())
+        .await;
+}
+
+#[tauri::command]
+pub async fn check_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<UpdateDto, String> {
+    let update = fetch_update(&app).await?;
+    remember(&state, &update).await;
+    Ok(update)
+}
+
+#[tauri::command]
+pub async fn pending_update(state: State<'_, AppState>) -> Result<Option<UpdateDto>, String> {
+    Ok(state.inner.known_update().await.map(|known| UpdateDto {
+        available: known.available,
+        current: known.current,
+        version: known.version,
+        notes: known.notes,
+    }))
 }
 
 #[tauri::command]

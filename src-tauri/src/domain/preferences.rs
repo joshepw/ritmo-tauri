@@ -18,6 +18,8 @@ pub enum MeetingWindow {
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     pub open_at_login: bool,
+    #[serde(default)]
+    pub show_dock_icon: bool,
     pub show_timer_in_tray: bool,
     pub show_meeting_in_tray: bool,
     pub meeting_window: MeetingWindow,
@@ -73,6 +75,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             open_at_login: true,
+            show_dock_icon: false,
             show_timer_in_tray: true,
             show_meeting_in_tray: true,
             meeting_window: MeetingWindow::Hour,
@@ -237,6 +240,7 @@ pub enum PrefEffect {
     PomodoroTiming,
     Shortcut,
     Bubble(bool),
+    Dock(bool),
 }
 
 pub fn calendar_visible(google_selected: bool, id: &str, prefs: &Preferences) -> bool {
@@ -270,6 +274,13 @@ pub fn apply_pref_patch(
                 let enabled = expect_bool(value)?;
                 prefs.open_at_login = enabled;
                 effects.push(PrefEffect::Autostart(enabled));
+            }
+            "dockIcon" => {
+                let enabled = expect_bool(value)?;
+                if enabled != prefs.show_dock_icon {
+                    prefs.show_dock_icon = enabled;
+                    effects.push(PrefEffect::Dock(enabled));
+                }
             }
             "barTimer" => prefs.show_timer_in_tray = expect_bool(value)?,
             "barMeeting" => prefs.show_meeting_in_tray = expect_bool(value)?,
@@ -777,6 +788,19 @@ mod tests {
         assert!(prefs.bubble_avatar);
         assert_eq!(effects, vec![PrefEffect::Bubble(true)]);
         let again = apply_pref_patch(&mut prefs, json!({ "bubbleAvatar": true }).as_object().unwrap()).unwrap();
+        assert!(again.is_empty());
+    }
+
+    #[test]
+    fn dock_icon_stays_hidden_until_enabled() {
+        let mut value = serde_json::to_value(Preferences::default()).unwrap();
+        value.as_object_mut().unwrap().remove("showDockIcon");
+        let mut prefs: Preferences = serde_json::from_value(value).unwrap();
+        assert!(!prefs.show_dock_icon);
+        let effects = apply_pref_patch(&mut prefs, json!({ "dockIcon": true }).as_object().unwrap()).unwrap();
+        assert!(prefs.show_dock_icon);
+        assert_eq!(effects, vec![PrefEffect::Dock(true)]);
+        let again = apply_pref_patch(&mut prefs, json!({ "dockIcon": true }).as_object().unwrap()).unwrap();
         assert!(again.is_empty());
     }
 }

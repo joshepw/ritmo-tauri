@@ -190,6 +190,7 @@ pub struct PomodoroDto {
 #[serde(rename_all = "camelCase")]
 pub struct PrefsDto {
     pub login: bool,
+    pub dock_icon: bool,
     pub bar_timer: bool,
     pub bar_meeting: bool,
     pub bar_meet_min: String,
@@ -561,6 +562,7 @@ fn pomodoro_dto(state: &PomodoroState, prefs: &Preferences) -> PomodoroDto {
 fn prefs_dto(prefs: &Preferences) -> PrefsDto {
     PrefsDto {
         login: prefs.open_at_login,
+        dock_icon: prefs.show_dock_icon,
         bar_timer: prefs.show_timer_in_tray,
         bar_meeting: prefs.show_meeting_in_tray,
         bar_meet_min: window_label(prefs.meeting_window).into(),
@@ -699,6 +701,7 @@ mod tests {
             done: false,
             list_id: place.into(),
             clickup_list: String::new(),
+            clickup_group: String::new(),
             status: String::new(),
             status_color: String::new(),
             priority: String::new(),

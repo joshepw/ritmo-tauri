@@ -35,6 +35,8 @@ pub struct Persisted {
     pub factorial_employee_id: Option<String>,
     #[serde(default)]
     pub clickup_team_id: Option<String>,
+    #[serde(default)]
+    pub clickup_statuses: HashMap<String, crate::infrastructure::clickup::StatusCache>,
 }
 
 pub fn load(app: &AppHandle) -> Persisted {
